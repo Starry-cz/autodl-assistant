@@ -178,8 +178,8 @@ function renderServer(){
   // 磁盘代码已更新而后台仍在运行旧版本时提示；旧版后台的状态里没有 server 字段。
   const node=$('#stale-backend'),server=appState.server,stale=!server||server.codeChanged===true;
   node.hidden=!stale;
-  const text=!server?'本地后台仍是旧版本，新功能没有生效。关闭网页或再次双击“启动监测台.cmd”都不会替换已在运行的后台。请先暂停任务、确认没有“提交中/验证实例与数据/等待绑定核对”的任务，再在任务管理器“详细信息”中结束本项目的 node.exe（再次双击启动程序会显示它的 PID），关闭专用浏览器窗口，然后重新双击启动。'
-    :'磁盘上的程序已更新，但本地后台仍在运行启动时的代码。关闭网页不会停止后台。请在没有“提交中/验证实例与数据”的任务时运行 npm.cmd run stop，或再次双击“启动监测台.cmd”按提示输入 Y 重启。';
+  const text=!server?'本地后台仍是旧版本，新功能没有生效。关闭网页或再次双击“启动抢卡助手.cmd”都不会替换已在运行的后台。请先暂停任务、确认没有“提交中/验证实例与数据/等待绑定核对”的任务，再在任务管理器“详细信息”中结束本项目的 node.exe，关闭专用浏览器窗口，然后重新双击“启动抢卡助手.cmd”。'
+    :'磁盘上的程序已更新，但本地后台仍在运行启动时的代码。关闭网页不会停止后台。桌面版请从托盘选择“停止并退出”后重新打开；源码版请先运行“停止抢卡助手.cmd”，等待停止后再运行“启动抢卡助手.cmd”。';
   if(stale&&node.textContent!==text)node.textContent=text;
 }
 function renderBrowser(){
