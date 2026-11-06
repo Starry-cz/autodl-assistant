@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import { createApplication } from '../src/server.mjs';
 import { SyntheticAdapter } from './fixtures/synthetic-adapter.mjs';
 
@@ -56,4 +57,33 @@ test('服务器正常关闭会取消更新网络请求，检查失败不影响�
   const closing = f.app.close();
   assert.equal((await pending).status, 200); await closing;
   assert.equal(aborted, true); assert.equal(f.app.store.tasks().length, taskCount);
+});
+
+test('退出时完整回复正在检查的keep-alive请求，然后自动关闭连接与后台', async t => {
+  let entered;
+  const entry = new Promise(resolve => { entered = resolve; });
+  const f = await fixture(t, { fetchImpl: async (_url, { signal }) => {
+    entered(); return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+  } });
+  const agent = new http.Agent({ keepAlive: true });
+  let timeout;
+  try {
+    // 更新网络尚未结束时启动退出；浏览器原本会将这条HTTP连接留给后续状态轮询。
+    const received = new Promise((resolve, reject) => {
+      const req = http.request(f.base + '/api/updates/check', { method: 'POST', agent,
+        headers: { 'X-Local-Token': f.app.token, 'Content-Type': 'application/json', 'Content-Length': 2 } }, res => {
+        let content = ''; res.setEncoding('utf8'); res.on('data', part => { content += part; });
+        res.on('end', () => resolve({ status: res.statusCode, complete: res.complete, content }));
+        res.on('error', reject);
+      });
+      req.on('error', reject); req.end('{}');
+    });
+    await entry;
+    const closing = f.app.close();
+    const result = await received;
+    assert.equal(result.status, 200); assert.equal(result.complete, true);
+    assert.equal(JSON.parse(result.content).updates.status, 'idle');
+    await Promise.race([closing, new Promise((_resolve, reject) => { timeout = setTimeout(() => reject(Error('完整回复后后台仍在等待keep-alive连接')), 500); })]);
+    assert.equal(f.app.server.listening, false);
+  } finally { clearTimeout(timeout); agent.destroy(); }
 });

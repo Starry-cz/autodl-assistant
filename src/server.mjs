@@ -263,7 +263,11 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
     if (Date.now() - codeCheck.at > 5000) codeCheck = { at: Date.now(), changed: fingerprint() !== startCode };
     return { startedAt, codeChanged: codeCheck.changed, canStop: typeof onStop === 'function' };
   }
-  function json(res,status,body) { res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}); res.end(JSON.stringify(body)); }
+  function json(res,status,body) {
+    // 关闭开始前进入的异步请求也要在回复后结束连接，避免页面轮询复用它而阻塞正常退出。
+    if(closing) res.setHeader('Connection','close');
+    res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}); res.end(JSON.stringify(body));
+  }
   async function body(req) {
     let size=0, chunks=[];
     for await (const part of req) { size+=part.length; if(size>98304) fail('SIZE','请求过大',{status:413}); chunks.push(part); }
@@ -273,6 +277,7 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
     return data;
   }
   const server = http.createServer(async(req,res)=>{
+    if(closing) res.setHeader('Connection','close');
     res.setHeader('X-Content-Type-Options','nosniff'); res.setHeader('Referrer-Policy','no-referrer');
     res.setHeader('X-Frame-Options','DENY');
     res.setHeader('Cross-Origin-Resource-Policy','same-origin');
