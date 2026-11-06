@@ -1,6 +1,6 @@
 # AutoDL 助手
 
-v1.0.1 · 本地运行的中文 AutoDL 工作台，集中查看 GPU 库存、管理抢卡任务、浏览实例与账单。
+v1.0.2 · 本地运行的中文 AutoDL 工作台，集中查看 GPU 库存、管理抢卡任务、浏览实例与账单。
 
 ## 功能
 
@@ -13,67 +13,57 @@ v1.0.1 · 本地运行的中文 AutoDL 工作台，集中查看 GPU 库存、管
 
 ## 安装与启动
 
-下面两种方式任选一种，安装的是同一版本。均面向 **Windows 10/11**，不需要本机 GPU，也不需要 Git。
+**不需要提前安装 Node.js、npm 或 Git，也不需要管理员权限和本机 GPU。** 下载后双击即可，启动器会自动准备运行环境。
 
-### 先准备 Node.js
+适用于 **Windows 10/11 64 位（x64 / ARM64）**。ARM64 提供对应下载与启动路径，尚未在 ARM64 实机验证。
 
-从 [Node.js 官网](https://nodejs.org/en/download)安装 **22 或更新版本**，保留 npm 和加入 PATH 的默认选项。安装完成后，重新打开 PowerShell，分别运行：
+### 方式一：只下载一个文件（推荐）
 
-```powershell
-node --version
-npm.cmd --version
-```
+1. [下载 v1.0.2 安装启动文件](https://github.com/Starry-cz/autodl-assistant/releases/download/v1.0.2/autodl-assistant-setup.cmd)。
+2. 双击下载的 **autodl-assistant-setup.cmd**。首次需要联网下载源码、运行环境和依赖，可能需要几分钟，请等窗口提示“启动成功”后再关闭。
+3. 准备完成后，自动打开 [http://127.0.0.1:8787](http://127.0.0.1:8787)，即可登录 AutoDL 使用。
 
-第一条应显示 `v22` 或更高的主版本号，第二条应显示 npm 版本号。若提示找不到命令，先重新打开终端；仍不可用时重新检查 Node.js 安装。
+默认安装到 `%LOCALAPPDATA%\AutoDL-Assistant`。将这行路径粘贴到资源管理器地址栏即可找到项目。安装成功后会新建桌面的 **AutoDL助手** 快捷方式；如果桌面已有同名快捷方式，则保留原快捷方式。
 
-首次启动需要联网安装项目依赖并检查可用浏览器；会复用已安装的浏览器，无可用浏览器时下载 Chromium。无需事先登录 AutoDL，也无需填写 API Key。
+**以后双击桌面快捷方式，或安装目录内的「启动抢卡助手.cmd」即可，不用再次下载。**
 
-### 方式一：下载源码，解压后双击
+### 方式二：下载完整源码包，解压后双击
 
-1. [下载 v1.0.1 源码包](https://github.com/Starry-cz/autodl-assistant/releases/download/v1.0.1/autodl-assistant-v1.0.1.zip)。
-2. 右键 ZIP，选择“全部解压”，放到自己有写入权限的固定目录，例如 `D:\AutoDL助手`。**不要在压缩包内直接运行**，也不要只取出某一个启动文件。
-3. 打开解压后的项目文件夹，确认能看到 `package.json`、`public`、`src`、`scripts` 和 **启动抢卡助手.cmd**。
-4. 双击 **启动抢卡助手.cmd**，等待依赖与浏览器准备完成。脚本会在后台启动服务，并打开 [http://127.0.0.1:8787](http://127.0.0.1:8787)。首次下载可能需要几分钟，请等待窗口提示。
-5. 以后仍双击同一目录中的 **启动抢卡助手.cmd**；已有后台时只打开页面，不重复启动。
+1. [下载 v1.0.2 源码 ZIP](https://github.com/Starry-cz/autodl-assistant/releases/download/v1.0.2/autodl-assistant-v1.0.2.zip)。
+2. 右键 ZIP，选择“全部解压”，放到一个固定文件夹，例如桌面上的 `AutoDL助手`。**不要在压缩包内运行，也不要只取出某个启动文件。**
+3. 进入能看到 `package.json`、`public`、`src`、`scripts` 的项目文件夹，双击 **安装并启动.cmd** 或 **启动抢卡助手.cmd**。
+4. 等窗口提示“启动成功”，浏览器会打开助手页面。首次安装依赖可能较慢，请不要提前关闭窗口。以后双击当前目录中的 **启动抢卡助手.cmd**。
 
-### 方式二：两条 PowerShell 命令安装并运行
+两种方式均会检查可用的 Node.js；需要时自动下载 **Node.js 22.23.4** 到项目的 `.tools` 目录，不修改系统 PATH。启动器自动安装依赖并检查浏览器，无可用浏览器时下载 Chromium。首次准备需要能访问 GitHub、nodejs.org、npm 和浏览器下载服务。
 
-先完成上面的 Node.js 准备。在一个可写目录打开 **PowerShell**，依次粘贴以下两条命令（不是在 CMD 或 Node.js 交互窗口中输入）：
+### 可选：两条 PowerShell 命令安装并运行
 
-```powershell
-Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Starry-cz/autodl-assistant/main/install.ps1" -OutFile ".\install-autodl.ps1"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install-autodl.ps1
-```
-
-第一条下载安装脚本；第二条下载 v1.0.1 源码、解压、安装依赖、准备浏览器并启动。默认安装位置是：
-
-```text
-%LOCALAPPDATA%\AutoDL-Assistant
-```
-
-将这行路径粘贴到资源管理器地址栏即可找到程序。以后直接双击其中的 **启动抢卡助手.cmd**，不需要重新下载安装。也可以用一条 PowerShell 命令打开启动器：
+1. 按 **Win + R**，输入 `powershell`，回车。
+2. 依次复制下面两条命令，每条输入后按回车：
 
 ```powershell
-& "$env:LOCALAPPDATA\AutoDL-Assistant\启动抢卡助手.cmd"
+Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Starry-cz/autodl-assistant/main/install.ps1" -OutFile "$env:TEMP\install-autodl.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\install-autodl.ps1"
 ```
 
-想换安装目录时，将第二条命令改成：
+这与单文件安装方式使用同一安装流程，也不需要预装 Node.js。默认位置仍是 `%LOCALAPPDATA%\AutoDL-Assistant`。如需更换位置，在第二条命令末尾加 `-InstallDir`，例如（需有 D 盘）：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install-autodl.ps1 -InstallDir "D:\AutoDL助手"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\install-autodl.ps1" -InstallDir "D:\AutoDL助手"
 ```
 
-安装脚本不会覆盖非空目录。若默认位置已有项目，请直接使用其中的启动器；需要另装一份时指定新的空目录。两种方式不能同时占用默认的 `8787` 端口。
+### 后续启动、升级与换电脑
 
-### 换电脑、升级与常见问题
+- **再次启动**：使用桌面快捷方式或项目目录里的 **启动抢卡助手.cmd**。同目录已有后台时只打开页面，不重复启动；重复下载安装到同版本目录时也会复用已有启动器。
+- **升级旧版本**：先双击旧目录中的 **停止抢卡助手.cmd**，再将新版 ZIP 完整解压到新文件夹并启动。安装脚本不会覆盖旧版本或其他非空目录；新目录需重新登录。桌面已有快捷方式不会被替换，可先直接使用新版目录中的启动器。
+- **换电脑**：在新电脑任选上述方式重新安装，然后重新登录 AutoDL，按需填写 AI、通知等凭据。不要复制旧电脑的 `.tools`、`node_modules` 或 `.runtime`。
 
-- **换电脑**：在新电脑安装 Node.js，然后任选上述方式重新安装，在助手中重新登录 AutoDL。不要复制旧电脑的 `node_modules` 或 `.runtime`；依赖重新安装，AI Key、通知等凭据按需重新填写。
-- **从 v1.0.0 升级**：先运行旧目录里的 **停止抢卡助手.cmd**，等待后台停止，再将 v1.0.1 安装到新目录并启动。旧目录中的本地数据仍保留，新目录需重新登录；不要覆盖正在运行的项目目录。
+### 遇到问题
+
+- **下载失败或一直等待**：检查网络是否能访问上述服务，记录窗口中报错的下载地址。网络恢复后，若项目已解压，重新双击项目目录中的启动器；若源码尚未下载完成，再运行安装文件。
 - **提示端口已占用或另一目录已有后台**：到原目录运行 **停止抢卡助手.cmd**，再启动当前目录。新目录不会把另一份项目当作自己的后台。
-- **依赖或浏览器下载失败**：检查网络，随后重新双击已安装目录中的启动器；不必重复执行下载源码的安装命令。浏览器也可在项目目录执行 `npm.cmd run browser:install` 安装。
 - **页面没有自动打开**：后台提示启动成功后，手动访问 [本地页面](http://127.0.0.1:8787)。启动错误记录在项目的 `.runtime/server-error.log`。
-
-上述双击和命令安装方式都使用隐藏后台。需要前台查看运行日志时，可在已准备好依赖和浏览器的项目目录执行 `npm.cmd start`，并手动打开本地页面；按 Ctrl+C 停止前台进程。
+- **Windows 提示无法运行**：先核对文件是否来自本仓库的下载链接，记录完整提示以便排查；不需要关闭系统防护。
 
 ## 开始使用
 
@@ -104,17 +94,15 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install-autodl.ps1 -In
 
 ## 停止与本地数据
 
-关闭助手网页不会停止任务，电脑需要保持联网和唤醒。双击 **停止抢卡助手.cmd**，或执行以下命令停止后台：
-
-```powershell
-npm.cmd run stop
-```
+关闭助手网页不会停止任务，电脑需要保持联网和唤醒。双击项目目录里的 **停止抢卡助手.cmd** 停止后台；停止脚本也不需要系统预装 Node.js。
 
 **停止监测或本地后台不会关闭云端实例。** 使用结束后，请到 AutoDL 控制台关机。
 
 任务、日志和登录资料保存在 `.runtime/`，请妥善保留，不要上传或分享。桌面提醒需要助手页面保持打开。本项目为独立工具，与 AutoDL 官方无隶属关系。
 
 ## 开发
+
+普通使用无需执行以下命令。开发时请准备 Node.js 22+（含 npm），在项目目录运行：
 
 ```powershell
 npm.cmd test
