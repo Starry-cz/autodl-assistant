@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { createApplication } from '../src/server.mjs';
+import { offlineUpdateOptions } from '../tests/fixtures/updates.mjs';
 import { normalizeAccountIdentity } from '../src/account-scope.mjs';
 import { createObservatoryFixtureAdapter, OBSERVATORY_INSTANCE_ID } from '../tests/fixtures/observatory.mjs';
 
@@ -50,7 +51,7 @@ try {
   };
   Object.assign(adapter, { probe: forbidden, prepare: forbidden, submit: forbidden, boot: forbidden, inspectBoot: forbidden });
   // 隔离验收固定构建标识，不让其他协作者同时编辑文件触发无关的后台更新横幅。
-  app = createApplication({ runtimeDir, startEngine: false, fingerprint: () => 'synthetic-workspace-ui-build', adapters: { autodl: adapter },
+  app = createApplication({ updatesOptions: offlineUpdateOptions, runtimeDir, startEngine: false, fingerprint: () => 'synthetic-workspace-ui-build', adapters: { autodl: adapter },
     aiOptions: { fetchImpl: forbidden }, walletOptions: { fetchImpl: forbidden } });
   await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
   const base = 'http://127.0.0.1:' + app.server.address().port;

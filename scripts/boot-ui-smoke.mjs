@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { createApplication } from '../src/server.mjs';
+import { offlineUpdateOptions } from '../tests/fixtures/updates.mjs';
 import { SyntheticAdapter } from '../tests/fixtures/synthetic-adapter.mjs';
 import { AutoDLBrowserAdapter } from '../src/adapters/autodl.mjs';
 
@@ -29,7 +30,7 @@ try {
     login: forbidden, checkLogin: forbidden, probe: forbidden, prepare: forbidden, submit: forbidden,
     inspectBoot: forbidden, boot: forbidden,
   });
-  app = createApplication({ runtimeDir: dir, startEngine: false, fingerprint: () => 'synthetic-boot-ui-build', adapters: { autodl },
+  app = createApplication({ updatesOptions: offlineUpdateOptions, runtimeDir: dir, startEngine: false, fingerprint: () => 'synthetic-boot-ui-build', adapters: { autodl },
     aiOptions: { fetchImpl: forbidden }, walletOptions: { fetchImpl: forbidden } });
   await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${app.server.address().port}`;

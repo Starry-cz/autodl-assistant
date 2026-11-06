@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { createApplication } from '../src/server.mjs';
+import { offlineUpdateOptions } from '../tests/fixtures/updates.mjs';
 import { SyntheticAdapter } from '../tests/fixtures/synthetic-adapter.mjs';
 import { seedGpuCatalog } from '../tests/fixtures/gpu-catalog.mjs';
 import { AutoDLBrowserAdapter } from '../src/adapters/autodl.mjs';
@@ -38,7 +39,7 @@ try {
     },
     probe: async () => { throw Error('isolated login UI must never start monitoring'); },
   });
-  app = createApplication({ runtimeDir: dir, startEngine: false,
+  app = createApplication({ updatesOptions: offlineUpdateOptions, runtimeDir: dir, startEngine: false,
     adapters: { autodl },
     aiOptions: { fetchImpl: async () => { throw Error('login UI must not call model services'); } } });
   // 模拟上次“同步 AutoDL 型号”保存在本机的合成目录。

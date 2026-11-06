@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { createApplication } from '../src/server.mjs';
+import { offlineUpdateOptions } from '../tests/fixtures/updates.mjs';
 import { testConfig } from '../tests/fixtures/config.mjs';
 import { SyntheticAdapter } from '../tests/fixtures/synthetic-adapter.mjs';
 import { seedGpuCatalog, SYNTHETIC_GPU_CATALOG } from '../tests/fixtures/gpu-catalog.mjs';
@@ -30,7 +31,7 @@ try {
     login: forbidden, checkLogin: forbidden, instances: forbidden, probe: forbidden, prepare: forbidden,
     submit: forbidden, boot: forbidden, reconcile: forbidden,
   });
-  app = createApplication({ runtimeDir: dir, startEngine: false, fingerprint: () => 'synthetic-task-monitor-ui-build',
+  app = createApplication({ updatesOptions: offlineUpdateOptions, runtimeDir: dir, startEngine: false, fingerprint: () => 'synthetic-task-monitor-ui-build',
     adapters: { autodl: adapter }, aiOptions: { fetchImpl: forbidden }, walletOptions: { fetchImpl: forbidden } });
   seedGpuCatalog(app.store, { ...structuredClone(SYNTHETIC_GPU_CATALOG), checkedAt: Date.now() });
   const now = Date.now();

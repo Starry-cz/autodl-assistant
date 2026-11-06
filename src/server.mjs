@@ -23,6 +23,7 @@ import { AppError, redact, messageOf, fail } from './errors.mjs';
 import { assertLocalRequest } from './local-access.mjs';
 import { AutoDLBrowserAdapter } from './adapters/autodl.mjs';
 import { AiAssistant, AI_PROVIDERS } from './ai.mjs';
+import { ReleaseUpdates } from './updates.mjs';
 import { normalizePlanInput, extractConstraints, mergeConstraints, buildPlan, normalizeImageHint, pickImageOption } from './env-plan.mjs';
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // 发布版本统一来自包信息，避免健康检查与下载版本不一致。
@@ -103,7 +104,7 @@ export function codeFingerprint(root = ROOT) {
 }
 export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR || path.join(ROOT,'.runtime'),
   adapters: suppliedAdapters, startEngine = true, lock = true, aiOptions = {}, walletOptions = {}, secretProtector,
-  onStop = null, fingerprint = codeFingerprint, imageBusyWaitMs = 20000 } = {}) {
+  onStop = null, fingerprint = codeFingerprint, imageBusyWaitMs = 20000, updatesOptions = {} } = {}) {
   // 相对运行目录统一从项目根目录解析，不依赖启动终端所在位置。
   runtimeDir = path.resolve(ROOT, runtimeDir);
   fs.mkdirSync(runtimeDir, {recursive:true,mode:0o700});
@@ -252,6 +253,8 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
     }
   }
   const ai = new AiAssistant(store, aiOptions);
+  // 检查器不主动联网；启动页请求与手动检查共用缓存，当前版本始终来自本项目包信息。
+  const updates = new ReleaseUpdates({ ...updatesOptions, currentVersion: APP_VERSION });
   const token = randomBytes(32).toString('hex');
   const startedAt = Date.now(), startCode = fingerprint();
   let codeCheck = { at: 0, changed: false };
@@ -292,7 +295,7 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
           observatory:adapters.autodl.sessionStatus?.()?.state === 'ready' && (!accountEnabled||visibleIdentity()) ? observatory.publicState() : null,
           market:adapters.autodl.sessionStatus?.()?.state === 'ready' && (!accountEnabled||visibleIdentity()) ? market.publicState(visibleCatalog()) : null,
           wallet:accountEnabled&&!visibleIdentity()?{configured:false,snapshot:null}:wallet.publicState(),credentialStorage:store.secretStorage.publicState(),regions:REGIONS,
-          gpuCatalog:normalizeGpuCatalog(visibleCatalog()),ai:ai.publicState(),aiProviders:AI_PROVIDERS,server:serverState(),now:Date.now()});
+          gpuCatalog:normalizeGpuCatalog(visibleCatalog()),ai:ai.publicState(),aiProviders:AI_PROVIDERS,updates:updates.publicState(),server:serverState(),now:Date.now()});
         const taskLogs = url.pathname.match(/^\/api\/tasks\/([^/]+)\/logs$/);
         if(req.method === 'GET' && taskLogs) {
           requireSession();
@@ -306,6 +309,10 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
         if(req.method !== 'POST') fail('METHOD','不支持的请求方法',{status:405});
         if(!(req.headers['content-type'] || '').startsWith('application/json')) fail('CONTENT_TYPE','控制请求需使用 JSON',{status:415});
         const data = await body(req);
+        if(url.pathname === '/api/updates/check') {
+          if(data.force !== undefined && typeof data.force !== 'boolean') fail('UPDATES','是否立即检查更新必须为布尔值');
+          return json(res,200,{updates:await updates.check({force:data.force===true})});
+        }
         // 看板只读同步与抢卡共用页面操作锁；账户信息只在当前本地服务内缓存。
         if(url.pathname === '/api/observatory/overview') {
           if(data.targetId !== undefined && (typeof data.targetId !== 'string' || data.targetId.length > 100))fail('TARGET','监控实例 ID 无效');
@@ -514,7 +521,7 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
         fail('NOT_FOUND','接口不存在',{status:404});
       }
       if(req.method!=='GET') fail('METHOD','不支持的请求方法',{status:405});
-      const assets = {'/':'index.html','/index.html':'index.html','/app.js':'app.js','/task-monitor.js':'task-monitor.js','/account.js':'account.js','/images.js':'images.js','/ai.js':'ai.js','/plan.js':'plan.js','/observatory.js':'observatory.js','/market.js':'market.js','/profile.js':'profile.js','/style.css':'style.css','/favicon.svg':'favicon.svg'};
+      const assets = {'/':'index.html','/index.html':'index.html','/app.js':'app.js','/task-monitor.js':'task-monitor.js','/account.js':'account.js','/updates.js':'updates.js','/images.js':'images.js','/ai.js':'ai.js','/plan.js':'plan.js','/observatory.js':'observatory.js','/market.js':'market.js','/profile.js':'profile.js','/style.css':'style.css','/favicon.svg':'favicon.svg'};
       const asset=assets[url.pathname];
       if(!asset) fail('NOT_FOUND','页面不存在',{status:404});
       const contentType=asset.endsWith('.css')?'text/css':asset.endsWith('.js')?'text/javascript':asset.endsWith('.svg')?'image/svg+xml':'text/html';
@@ -530,9 +537,9 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
   });
   if(startEngine) engine.start();
   let closing;
-  return {server,store,engine,adapters,ai,wallet,observatory,market,token,close(){
+  return {server,store,engine,adapters,ai,wallet,observatory,market,updates,token,close(){
     if (!closing) closing = (async () => {
-      ai.close(); wallet.close();
+      ai.close(); wallet.close(); updates.close();
       const closed = new Promise(resolve => server.close(resolve));
       try {
         await engine.stop(); await notifier.stop();

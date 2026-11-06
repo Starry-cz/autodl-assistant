@@ -297,7 +297,7 @@ async function refresh(){
       initialSettings=false;window.resetAccountState?.();seenNotifications=null;$('#task-form').elements.paidConsent.checked=false;if($('#task-dialog').open)$('#task-dialog').close();detailId=null;
     }
     $('#connection').textContent='已连接';$('#last-updated').textContent='最后同步 '+time(appState.now);renderServer();renderModelCatalog();renderBrowser();
-    renderTasks();renderNotifications();if(detailId&&$('#task-dialog').open)renderDetail();
+    renderTasks();renderNotifications();window.renderUpdates?.(appState.updates);if(detailId&&$('#task-dialog').open)renderDetail();
     if(!initialSettings){initialSettings=true;const form=$('#settings-form');for(const key of Object.keys(appState.settings)){if(form.elements[key]){if(form.elements[key].type==='checkbox')form.elements[key].checked=appState.settings[key];else form.elements[key].value=appState.settings[key];}}}
     window.dispatchEvent(new Event('appstatechange'));
   }catch(e){$('#connection').textContent='已断开';$('#last-updated').textContent='服务未连接，监测可能已经停止';}finally{fetching=false;}

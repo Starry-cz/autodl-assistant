@@ -5,7 +5,7 @@
   <meta name="local-token" content="__LOCAL_TOKEN__">
   <title>AutoDL 抢卡助手 · 本地工作台</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="stylesheet" href="/style.css">
-  <script src="/task-monitor.js" defer></script><script src="/app.js" defer></script><script src="/account.js" defer></script><script src="/images.js" defer></script><script src="/ai.js" defer></script><script src="/plan.js" defer></script><script src="/observatory.js" defer></script><script src="/market.js" defer></script><script src="/profile.js" defer></script>
+  <script src="/task-monitor.js" defer></script><script src="/app.js" defer></script><script src="/account.js" defer></script><script src="/images.js" defer></script><script src="/ai.js" defer></script><script src="/plan.js" defer></script><script src="/observatory.js" defer></script><script src="/market.js" defer></script><script src="/profile.js" defer></script><script src="/updates.js" defer></script>
 </head>
 <body>
   <aside class="sidebar">
@@ -25,6 +25,7 @@
     <div class="sidebar-bottom">
       <button id="account-entry" class="nav-item account-entry" type="button" data-view="profile" aria-label="打开账号页面">
         <span id="account-avatar" class="account-avatar" aria-hidden="true">AD</span><span class="account-copy"><strong id="account-name">登录 AutoDL</strong><small id="account-status">尚未连接</small></span><span class="account-chevron" aria-hidden="true">›</span>
+        <span id="account-update-badge" class="account-update-badge" hidden>有新版本</span>
       </button>
     </div>
   </aside>
@@ -115,6 +116,19 @@
   <p id="browser-busy" class="browser-busy hidden">后台正在操作页面；请稍后重试或先暂停任务。</p>
 </section>
   <section class="profile-local"><h2>本机运行状态</h2><p><span class="online-dot"></span>本地服务 <span id="connection">连接中</span></p><p class="hint">监测由本机服务持续运行。关闭网页不会停止任务，电脑休眠或服务退出后会停止监测。</p><p class="profile-version">本地改造版 · 普通容器实例</p></section>
+  <!-- 版本检查与账号登录互相独立；下载入口不会自动停止或替换正在运行的程序。 -->
+  <section id="version-updates" class="profile-updates" aria-labelledby="updates-title">
+    <div class="updates-heading"><div><h2 id="updates-title">版本与更新</h2><p>自动检查正式版本，也可随时手动检查。</p></div><button id="update-check" type="button" class="button">检查更新</button></div>
+    <div class="updates-panel">
+      <div class="updates-overview">
+        <dl class="updates-versions"><div><dt>当前版本 <span id="update-channel"></span></dt><dd id="update-current-version">读取中…</dd></div><div><dt>最新正式版</dt><dd id="update-latest-version">尚未检查</dd></div></dl>
+        <div class="updates-downloads"><a id="update-main-download" class="button primary" target="_blank" rel="noopener noreferrer" hidden>下载新版</a><a id="update-portable-download" class="button" target="_blank" rel="noopener noreferrer" hidden>下载便携包</a><a id="update-release-link" class="updates-release-link" href="https://github.com/Starry-cz/autodl-assistant/releases/latest" target="_blank" rel="noopener noreferrer">查看发布页 ↗</a></div>
+      </div>
+      <div class="updates-feedback"><p id="update-status" role="status" aria-live="polite">正在准备检查更新。</p><span id="update-checked-at"></span></div>
+      <div id="update-guidance" class="updates-guidance" hidden><strong>更新前，请先停止任务并完全退出助手。</strong><p id="update-instructions"></p></div>
+      <details id="update-notes" class="updates-notes" hidden><summary>查看更新说明</summary><p id="update-release-notes"></p></details>
+    </div>
+  </section>
 </section>
 <!-- 新增页面只展示读取结果；开机等付费操作仍回到原任务表单确认。 -->
 <section id="overview" class="view">

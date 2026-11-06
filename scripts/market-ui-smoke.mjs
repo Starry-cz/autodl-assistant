@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { createApplication } from '../src/server.mjs';
+import { offlineUpdateOptions } from '../tests/fixtures/updates.mjs';
 import { createObservatoryFixtureAdapter } from '../tests/fixtures/observatory.mjs';
 import { seedGpuCatalog, SYNTHETIC_GPU_CATALOG, syntheticGpuCatalog } from '../tests/fixtures/gpu-catalog.mjs';
 
@@ -44,7 +45,7 @@ try {
     ].filter(row => (!model || row.model === model) && (!region || row.region === region)),
   }));
   Object.assign(adapter, { login: forbidden, checkLogin: forbidden, probe: forbidden, prepare: forbidden, submit: forbidden, boot: forbidden });
-  app = createApplication({ runtimeDir: dir, startEngine: false, fingerprint: () => 'synthetic-market-ui-build',
+  app = createApplication({ updatesOptions: offlineUpdateOptions, runtimeDir: dir, startEngine: false, fingerprint: () => 'synthetic-market-ui-build',
     adapters: { autodl: adapter }, aiOptions: { fetchImpl: forbidden }, walletOptions: { fetchImpl: forbidden } });
   seedGpuCatalog(app.store, { ...structuredClone(SYNTHETIC_GPU_CATALOG), checkedAt: Date.now() });
   app.market.record(app.store.data.gpuCatalog);

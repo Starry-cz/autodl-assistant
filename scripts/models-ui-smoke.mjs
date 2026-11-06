@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { createApplication } from '../src/server.mjs';
+import { offlineUpdateOptions } from '../tests/fixtures/updates.mjs';
 import { SYNTHETIC_GPU_CATALOG, syntheticGpuCatalog } from '../tests/fixtures/gpu-catalog.mjs';
 import { SyntheticAdapter } from '../tests/fixtures/synthetic-adapter.mjs';
 import { AutoDLBrowserAdapter } from '../src/adapters/autodl.mjs';
@@ -34,7 +35,7 @@ try {
     sessionStatus: () => ({ state: 'ready', browserOpen: true, label: '会话可用', message: '仅内存合成会话', checkedAt: 1, ...(readySince ? { readySince } : {}) }),
     instances: async () => sources,
   });
-  app = createApplication({ runtimeDir: dir, startEngine: false, fingerprint: () => 'synthetic-models-ui-build',
+  app = createApplication({ updatesOptions: offlineUpdateOptions, runtimeDir: dir, startEngine: false, fingerprint: () => 'synthetic-models-ui-build',
     adapters: { autodl }, aiOptions: { fetchImpl: forbidden } });
   await new Promise((resolve, reject) => { app.server.once('error', reject); app.server.listen(0, '127.0.0.1', resolve); });
   const base = 'http://127.0.0.1:' + app.server.address().port;

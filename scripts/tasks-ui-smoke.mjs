@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { createApplication } from '../src/server.mjs';
+import { offlineUpdateOptions } from '../tests/fixtures/updates.mjs';
 import { normalizeConfig } from '../src/config.mjs';
 import { SyntheticAdapter } from '../tests/fixtures/synthetic-adapter.mjs';
 import { seedGpuCatalog } from '../tests/fixtures/gpu-catalog.mjs';
@@ -24,7 +25,7 @@ try {
     imageOptions:syntheticImageOptions,sessionStatus:()=>({state:'ready',browserOpen:true,label:'会话可用',checkedAt:1}),
     login:forbidden,checkLogin:forbidden,instances:forbidden,probe:forbidden,prepare:forbidden,submit:forbidden,reconcile:forbidden,
   });
-  app=createApplication({runtimeDir:dir,startEngine:false,adapters:{autodl},aiOptions:{fetchImpl:forbidden},walletOptions:{fetchImpl:forbidden}});
+  app=createApplication({ updatesOptions: offlineUpdateOptions,runtimeDir:dir,startEngine:false,adapters:{autodl},aiOptions:{fetchImpl:forbidden},walletOptions:{fetchImpl:forbidden}});
   const old=app.store.create(normalizeConfig(configInput({name:'旧的 4090 任务',cuda:'13.0',imagePath:['PyTorch','2.1.0','3.10(ubuntu22.04)','13.0']})));
   app.store.patch(old,{state:'attention',lastError:'镜像路径第4级“13.0”不唯一或已失效，请重新选择'});
   // 模拟上次“同步 AutoDL 型号”保存在本机的合成目录。

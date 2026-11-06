@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { createApplication } from '../src/server.mjs';
+import { offlineUpdateOptions } from '../tests/fixtures/updates.mjs';
 import { SyntheticAdapter } from '../tests/fixtures/synthetic-adapter.mjs';
 import { seedGpuCatalog } from '../tests/fixtures/gpu-catalog.mjs';
 import { AutoDLBrowserAdapter } from '../src/adapters/autodl.mjs';
@@ -23,7 +24,7 @@ const errors=[],blocked=[],posts=[];let app,browser,calls=0,walletCalls=0,assets
 const forbidden=async()=>{forbiddenCalls++;throw Error('账户测试不允许真实登录、提交、通知或模型请求');};
 try {
  const autodl=Object.assign(new SyntheticAdapter(),{imageOptions:syntheticImageOptions,sessionStatus:()=>({state:'ready',browserOpen:true,label:'会话可用',message:'仅合成会话',checkedAt:1}),instances:async()=>{calls++;return rows;},login:forbidden,checkLogin:forbidden,logout:async()=>({message:'已退出合成会话'}),submit:forbidden,reconcile:forbidden});
- app=createApplication({runtimeDir:dir,startEngine:false,fingerprint:()=> 'synthetic-account-ui-build',adapters:{autodl},aiOptions:{fetchImpl:forbidden},walletOptions:{fetchImpl:async()=>{walletCalls++;return new Response(JSON.stringify({code:'Success',data:{assets,voucher_balance:50000}}));}}});
+ app=createApplication({ updatesOptions: offlineUpdateOptions,runtimeDir:dir,startEngine:false,fingerprint:()=> 'synthetic-account-ui-build',adapters:{autodl},aiOptions:{fetchImpl:forbidden},walletOptions:{fetchImpl:async()=>{walletCalls++;return new Response(JSON.stringify({code:'Success',data:{assets,voucher_balance:50000}}));}}});
  // 模拟上次“同步 AutoDL 型号”保存在本机的合成目录。
  seedGpuCatalog(app.store);
  await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));const base='http://127.0.0.1:'+app.server.address().port;

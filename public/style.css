@@ -79,6 +79,45 @@ h2, .panel-heading h2 { margin: 0 0 6px; color: var(--text); font-size: var(--fo
 .profile-local { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--line); }
 .profile-local p { margin: 12px 0 0; }
 .profile-version { color: var(--muted); font-size: var(--font-meta); }
+/* 更新区域沿用账号页分区；新版标记独立定位，不挤压账号名和登录状态。 */
+.account-entry { position: relative; }
+.account-update-badge { position: absolute; top: -9px; right: 10px; padding: 2px 7px; border: 1px solid #cbe3d6; border-radius: 6px; background: var(--chart-soft); color: var(--success) !important; font-size: var(--font-meta); font-weight: 500; line-height: 1.5; white-space: nowrap; }
+.profile-updates { margin-top: 26px; padding-top: 24px; border-top: 1px solid var(--line); scroll-margin-top: 86px; }
+.updates-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
+.updates-heading p { margin: 0; color: var(--muted); font-size: var(--font-small); }
+.updates-heading > .button { flex: none; min-height: 44px; }
+.updates-panel { padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.updates-overview { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px 32px; }
+.updates-versions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px 48px; margin: 0; }
+.updates-versions dt { color: var(--muted); font-size: var(--font-small); }
+.updates-versions dt span { margin-left: 6px; color: var(--muted); font-size: var(--font-meta); }
+.updates-versions dd { margin: 6px 0 0; color: var(--text); font-size: 20px; font-weight: 600; line-height: 1.4; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.updates-downloads { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
+.updates-downloads > .button { min-height: 44px; }
+.updates-release-link { display: inline-flex; align-items: center; min-height: 44px; padding: 8px 2px; color: var(--text-secondary); font-size: var(--font-small); text-decoration: underline; text-underline-offset: 3px; }
+.updates-feedback { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 5px 20px; margin-top: 16px; }
+.updates-feedback p { margin: 0; color: var(--text-secondary); font-size: var(--font-small); line-height: 1.65; overflow-wrap: anywhere; }
+.updates-feedback > span { color: var(--muted); font-size: var(--font-meta); }
+.updates-panel[data-update-state=available] #update-status { color: var(--success); font-weight: 500; }
+.updates-panel[data-update-state=error] #update-status { color: var(--warning); }
+.updates-guidance { margin-top: 16px; padding: 12px 14px; border-radius: 8px; background: var(--surface); font-size: var(--font-small); line-height: 1.7; }
+.updates-guidance strong { color: var(--text); font-weight: 500; }
+.updates-guidance p { margin: 4px 0 0; color: var(--text-secondary); overflow-wrap: anywhere; }
+.updates-notes { margin-top: 14px; color: var(--text-secondary); font-size: var(--font-small); }
+.updates-notes summary { width: fit-content; min-height: 32px; padding-block: 5px; cursor: pointer; }
+.updates-notes p { max-height: 240px; margin: 10px 0 0; overflow-y: auto; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.75; }
+@media(max-width:760px) {
+  .account-update-badge { top: 2px; right: 1px; width: 9px; height: 9px; padding: 0; border-radius: 50%; border-color: var(--sidebar); background: var(--success); font-size: 0; }
+  .updates-panel { padding: 16px; }
+  .updates-overview { gap: 14px; }
+  .updates-versions { width: 100%; gap: 20px; }
+  .updates-downloads { justify-content: flex-start; }
+}
+@media(max-width:420px) {
+  .updates-heading { align-items: flex-start; flex-wrap: wrap; }
+  .updates-downloads { width: 100%; }
+  .updates-downloads > .button { flex: 1 1 auto; }
+}
 .browser-card { padding: 18px 20px 12px; scroll-margin-top: 85px; background: var(--surface); }
 .browser-card[data-session=ready] { border-color: var(--line); }
 .browser-main, .browser-header, .browser-heading, .browser-actions, .browser-bottom { display: flex; align-items: center; }

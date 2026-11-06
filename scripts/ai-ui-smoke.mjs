@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { createApplication } from '../src/server.mjs';
+import { offlineUpdateOptions } from '../tests/fixtures/updates.mjs';
 import { SyntheticAdapter } from '../tests/fixtures/synthetic-adapter.mjs';
 import { seedGpuCatalog } from '../tests/fixtures/gpu-catalog.mjs';
 
@@ -18,7 +19,7 @@ const secret = 'sk-ui-synthetic-not-real-123456789';
 let calls = 0, behavior = 'success', app, browser;
 const errors = [];
 try {
-  app = createApplication({ runtimeDir: dir, startEngine: false,
+  app = createApplication({ updatesOptions: offlineUpdateOptions, runtimeDir: dir, startEngine: false,
     adapters: { autodl: Object.assign(new SyntheticAdapter(), {
     imageOptions: syntheticImageOptions,
       sessionStatus: () => ({ state: 'ready', browserOpen: true, label: '会话可用', message: '仅内存合成会话', checkedAt: 1 }),

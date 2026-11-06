@@ -49,6 +49,10 @@ try {
   const health = await (await fetch(base + '/api/health')).json();
   assert.equal(health.runtimeDir, path.join(dataDir, 'runtime')); assert.notEqual(new URL(base).port, '8787');
   pass('内置 Node 启动独立本地服务');
+  // 同一界面在桌面包内必须选择桌面下载渠道，不能误导用户下载网页版源码。
+  const updateInfo = await page.evaluate(async () => (await api('/api/state')).updates);
+  assert.equal(updateInfo.channel, 'desktop'); assert.equal(updateInfo.currentVersion, expectedVersion);
+  pass('桌面版本检查识别当前版本与桌面下载渠道');
 
   const browserInfo = await desktop.evaluate(async ({ app }) => {
     const { createRequire } = process.getBuiltinModule('node:module');

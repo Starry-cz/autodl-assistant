@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { createApplication } from '../src/server.mjs';
+import { offlineUpdateOptions } from '../tests/fixtures/updates.mjs';
 import { createObservatoryFixtureAdapter, OBSERVATORY_INSTANCE_ID } from '../tests/fixtures/observatory.mjs';
 import { testConfig } from '../tests/fixtures/config.mjs';
 import { seedGpuCatalog } from '../tests/fixtures/gpu-catalog.mjs';
@@ -58,7 +59,7 @@ try {
   };
   Object.assign(adapter, { login: forbidden, checkLogin: forbidden, probe: forbidden, prepare: forbidden,
     submit: forbidden, boot: forbidden, inspectBoot: forbidden });
-  app = createApplication({ runtimeDir: dir, startEngine: false, fingerprint: () => 'synthetic-observatory-ui-build', adapters: { autodl: adapter },
+  app = createApplication({ updatesOptions: offlineUpdateOptions, runtimeDir: dir, startEngine: false, fingerprint: () => 'synthetic-observatory-ui-build', adapters: { autodl: adapter },
     aiOptions: { fetchImpl: forbidden }, walletOptions: { fetchImpl: forbidden } });
   seedGpuCatalog(app.store);
   await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));

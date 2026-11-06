@@ -96,7 +96,8 @@ async function startDesktop() {
       : '未找到桌面版开发浏览器，请先运行项目的桌面浏览器准备命令。');
   }
   const { createApplication } = await import('../src/server.mjs');
-  backend = createApplication({ runtimeDir: paths.runtime, onStop: () => { void exitController.request(); } });
+  // 桌面窗口共用网页界面，但更新入口应推荐带运行环境的桌面安装包。
+  backend = createApplication({ runtimeDir: paths.runtime, updatesOptions: { channel: 'desktop' }, onStop: () => { void exitController.request(); } });
   await listenDesktop(backend.server, {
     portFile: path.join(paths.userData, 'local-port.json'),
     onPortChanged: ({ previous, port }) => writeLog('warn', `桌面端口 ${previous} 已被占用，已重新分配为 ${port}`),
