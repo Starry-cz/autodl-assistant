@@ -45,7 +45,7 @@ try {
     & $nodeRuntime.Node -e "try { const lock=require('./package-lock.json').packages; require('playwright'); for(const p of ['playwright','playwright-core'])if(require(p+'/package.json').version!==lock['node_modules/'+p].version)process.exit(1); } catch { process.exit(1); }"
     if ($LASTEXITCODE -ne 0) {
         Write-Host '首次启动或依赖不完整，正在安装依赖……'
-        & $nodeRuntime.Npm ci
+        & $nodeRuntime.Npm ci --omit=dev
         if ($LASTEXITCODE -ne 0) { throw '依赖安装失败，请检查 npm 网络连接后重新启动。' }
     }
     Write-Host '[3/4] 检查浏览器'

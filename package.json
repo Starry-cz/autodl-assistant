@@ -1,14 +1,20 @@
 {
   "name": "autodl-gpu-watch",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "private": true,
   "license": "MIT",
   "type": "module",
+  "main": "desktop/main.mjs",
+  "author": "Starry-cz",
   "description": "AutoDL 中文抢卡助手：新租服务器、已有实例有卡开机与同地区克隆",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
+    "desktop:prepare": "node scripts/prepare-desktop.mjs",
+    "desktop:dev": "npm run desktop:prepare && electron .",
+    "desktop:build": "npm run desktop:prepare && electron-builder --config desktop/build-config.cjs --win --x64 --publish never",
+    "test:desktop": "node scripts/desktop-smoke.mjs",
     "start": "node src/server.mjs",
     "stop": "node scripts/stop-server.mjs",
     "dev": "node --watch src/server.mjs",
@@ -33,5 +39,9 @@
   },
   "dependencies": {
     "playwright": "^1.56.0"
+  },
+  "devDependencies": {
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0"
   }
 }
