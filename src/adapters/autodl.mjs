@@ -9,6 +9,7 @@ import { IMAGE_LEVELS, normalizeImagePrefix, imageLabel, imageCuda, exactImagePa
 import { readAutodlObservatory } from './autodl-observatory.mjs';
 import { readAutodlIdentity } from './autodl-account.mjs';
 import { readGpuCatalogApi, readMarketHostsApi } from './autodl-inventory.mjs';
+import { resolveBrowserLaunchOptions } from '../browser.mjs';
 const BASE = 'https://www.autodl.com';
 const LIST = `${BASE}/console/instance/list`;
 const escaped = text => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -165,14 +166,7 @@ export class AutoDLBrowserAdapter {
       loginWindowOpen: browserOpen && this.browserMode === 'login' };
   }
   async launchChannel(chromium) {
-    if (process.env.AUTODL_BROWSER_CHANNEL) return { channel: process.env.AUTODL_BROWSER_CHANNEL };
-    try { await fs.access(chromium.executablePath()); return { channel: 'chromium' }; } catch {}
-    // 优先复用已安装的 Edge，避免首次运行时自动下载大型浏览器组件。
-    if (process.platform === 'win32') {
-      const edge = path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft','Edge','Application','msedge.exe');
-      try { await fs.access(edge); return { channel:'msedge' }; } catch {}
-    }
-    return { channel: 'chromium' };
+    return resolveBrowserLaunchOptions(chromium);
   }
   async launchContext(mode) {
     const { chromium } = await import('playwright');
@@ -193,9 +187,10 @@ export class AutoDLBrowserAdapter {
         this.browserMode = mode;
       } catch (e) {
         this.setSession('error');
+        if (e.code === 'BROWSER_MISSING') throw e;
         throw new AppError('BROWSER', /Executable.*exist|browser.*install/i.test(e.message)
-          ? '浏览器组件尚未安装，请运行 npm run browser:install 后重试；也可按 README 使用已安装的 Edge'
-          : '无法启动专用浏览器；请确认没有另一进程占用 .runtime/browser-profile');
+          ? process.env.AUTODL_BROWSER_CHANNEL ? '指定的浏览器通道未安装，请检查 AUTODL_BROWSER_CHANNEL 和对应浏览器的安装。' : '浏览器组件尚未安装，请运行 npm.cmd run browser:install 后重试。'
+          : '无法启动专用浏览器；请确认浏览器可用，且没有另一进程占用 .runtime/browser-profile');
       }
       const context = this.context;
       context.on('close', () => {

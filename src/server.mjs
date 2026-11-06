@@ -104,6 +104,8 @@ export function codeFingerprint(root = ROOT) {
 export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR || path.join(ROOT,'.runtime'),
   adapters: suppliedAdapters, startEngine = true, lock = true, aiOptions = {}, walletOptions = {}, secretProtector,
   onStop = null, fingerprint = codeFingerprint, imageBusyWaitMs = 20000 } = {}) {
+  // 相对运行目录统一从项目根目录解析，不依赖启动终端所在位置。
+  runtimeDir = path.resolve(ROOT, runtimeDir);
   fs.mkdirSync(runtimeDir, {recursive:true,mode:0o700});
   const lockPath = path.join(runtimeDir,'server.lock');
   if (lock) {
@@ -277,7 +279,8 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
     try {
       const host = assertLocalRequest(req);
       const url = new URL(req.url,`http://${host}`);
-      if (url.pathname === '/api/health' && req.method === 'GET') return json(res,200,{ok:true,version:APP_VERSION});
+      // 启停入口用安装目录确认后台归属，避免同版本的不同副本误开、误停。
+      if (url.pathname === '/api/health' && req.method === 'GET') return json(res,200,{ok:true,app:'autodl-assistant',version:APP_VERSION,pid:process.pid,projectRoot:ROOT,runtimeDir,codeChanged:serverState().codeChanged});
       if(url.pathname.startsWith('/api/')) {
         if(req.headers['x-local-token'] !== token) fail('TOKEN','本地访问令牌无效，请重新加载页面',{status:403});
         if(req.method === 'GET' && url.pathname === '/api/state') return json(res,200,{...scopedStoreState(),
@@ -543,7 +546,7 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
 if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   let app, closing=false;
   const port=Number(process.env.PORT || 8787);
-  const lockPath=path.join(process.env.AUTODL_RUNTIME_DIR || path.join(ROOT,'.runtime'),'server.lock');
+  const lockPath=path.join(path.resolve(ROOT,process.env.AUTODL_RUNTIME_DIR || '.runtime'),'server.lock');
   const shutdown=async()=>{if(closing)return;closing=true;await app.close();process.exit(0);};
   const start=()=>{
     app=createApplication({onStop:()=>void shutdown()});
