@@ -1,0 +1,37 @@
+{
+  "name": "autodl-gpu-watch",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "AutoDL 中文抢卡助手：新租服务器、已有实例有卡开机与同地区克隆",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "stop": "node scripts/stop-server.mjs",
+    "dev": "node --watch src/server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node scripts-check.mjs",
+    "browser:install": "playwright install chromium",
+    "test:ui": "node scripts/ai-ui-smoke.mjs",
+    "test:login-ui": "node scripts/login-ui-smoke.mjs",
+    "test:models-ui": "node scripts/models-ui-smoke.mjs",
+    "test:tasks-ui": "node scripts/tasks-ui-smoke.mjs",
+    "test:boot-ui": "node scripts/boot-ui-smoke.mjs",
+    "test:design-ui": "node scripts/design-ui-smoke.mjs",
+    "test:account-ui": "node scripts/account-ui-smoke.mjs",
+    "diagnose:network": "node scripts/network-check.mjs",
+    "test:images-ui": "node scripts/images-ui-smoke.mjs",
+    "test:submit-ui": "node scripts/submit-ui-smoke.mjs",
+    "test:plan-ui": "node scripts/plan-ui-smoke.mjs",
+    "test:observatory-ui": "node scripts/observatory-ui-smoke.mjs",
+    "test:workspace-ui": "node scripts/workspace-ui-smoke.mjs",
+    "test:market-ui": "node scripts/market-ui-smoke.mjs",
+    "test:task-monitor-ui": "node scripts/task-monitor-ui-smoke.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.56.0"
+  }
+}

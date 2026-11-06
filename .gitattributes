@@ -1,0 +1,3 @@
+# 启动脚本保持 Windows 换行（克隆和“Download ZIP”都生效），双击运行更稳妥
+*.cmd text eol=crlf
+

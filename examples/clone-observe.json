@@ -1,0 +1,20 @@
+{
+  "name": "RTX 4090 同区迁移 · 先只监测",
+  "provider": "autodl",
+  "mode": "clone",
+  "action": "observe",
+  "paidConsent": false,
+  "sourceId": "replace-withsourceid",
+  "gpuModel": "RTX 4090",
+  "gpuCount": 1,
+  "regions": [
+    "北京B区"
+  ],
+  "cuda": "12.1",
+  "extraDiskGB": 0,
+  "pollSeconds": 20,
+  "timeoutMinutes": 1440,
+  "pricePolicy": "official",
+  "copyDataDisk": true
+}
+
