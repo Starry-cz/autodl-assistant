@@ -478,7 +478,8 @@ export class Engine {
     try {
       const receipt = await this.adapters[t.config.provider].attach(t, String(id || '').trim());
       // 绑定过程中被停止的任务保持停止；绑定前已停止的任务由用户主动绑定，恢复核对此实例。
-      this.store.patch(t, { operation: { ...t.operation, stage: 'accepted', receipt }, state: t.state === 'cancelled' && !wasCancelled ? 'cancelled' : 'verifying', nextCheckAt: this.clock() });
+      // 人工绑定与恢复一样，重新给予状态核对时间，不按旧点击时间立即判定超时。
+      this.store.patch(t, { operation: { ...t.operation, stage: 'accepted', receipt }, state: t.state === 'cancelled' && !wasCancelled ? 'cancelled' : 'verifying', nextCheckAt: this.clock(), verifySince: this.clock() });
       this.store.log(t, 'info', '已绑定经过型号与地区校验的目标实例，后续只检查此实例');
     } finally { this.busy = false; }
   }
@@ -500,7 +501,11 @@ export class Engine {
         return { cleared: false, extra: result.extra };
       }
       const resolved = { operationId: op.id, at: op.at, resolvedAt: this.clock(), outcome: 'not-created', hostNumber: op.quote?.host?.number || '', baselineCount: (op.baselineIds || []).length };
-      this.store.patch(t, { operation: null, state: t.state === 'cancelled' ? 'cancelled' : 'paused', lastError: null,
+      // 人工核对也保留完整基线，与自动核对共用延迟创建保护；稍后出现旧提交的实例时不能再次租用。
+      const rejection = { at: this.clock(), message: '人工重新核对确认未创建', operationId: op.id,
+        baselineIds: op.baselineIds || [], hostNumber: op.quote?.host?.number || '' };
+      this.store.patch(t, { operation: null, state: t.state === 'cancelled' ? 'cancelled' : 'paused', lastError: null, verifySince: null,
+        submitRejections: [...(t.submitRejections || []), rejection].slice(-5),
         resolvedSubmissions: [...(t.resolvedSubmissions || []), resolved].slice(-10) });
       this.store.log(t, 'warn', '用户要求重新核对：完整实例列表中都是提交前已有的实例，确认该次点击未创建实例，已清除提交记录');
       return { cleared: true, extra: [] };

@@ -292,7 +292,10 @@ async function refresh(){
   try{const previousCatalog=appState.gpuCatalog,previousOwner=appState.account?.identity?.ownerId;appState=await api('/api/state');window.taskMonitor.setClock(appState.now);
     // 同步刚完成时，同步前发出的轮询结果可能更旧；保留较新的型号目录。
     if(previousCatalog&&previousOwner===appState.account?.identity?.ownerId&&!(appState.gpuCatalog?.checkedAt>=previousCatalog.checkedAt))appState.gpuCatalog=previousCatalog;
-    if(previousOwner!==appState.account?.identity?.ownerId){window.resetAccountState?.();seenNotifications=null;$('#task-form').elements.paidConsent.checked=false;if($('#task-dialog').open)$('#task-dialog').close();detailId=null;}
+    if(previousOwner!==appState.account?.identity?.ownerId){
+      // 换账号后重新读取通知开关与凭据掩码，不能把旧表单里已开启的渠道保存给新账号。
+      initialSettings=false;window.resetAccountState?.();seenNotifications=null;$('#task-form').elements.paidConsent.checked=false;if($('#task-dialog').open)$('#task-dialog').close();detailId=null;
+    }
     $('#connection').textContent='已连接';$('#last-updated').textContent='最后同步 '+time(appState.now);renderServer();renderModelCatalog();renderBrowser();
     renderTasks();renderNotifications();if(detailId&&$('#task-dialog').open)renderDetail();
     if(!initialSettings){initialSettings=true;const form=$('#settings-form');for(const key of Object.keys(appState.settings)){if(form.elements[key]){if(form.elements[key].type==='checkbox')form.elements[key].checked=appState.settings[key];else form.elements[key].value=appState.settings[key];}}}

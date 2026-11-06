@@ -8,6 +8,8 @@ import { spawn } from 'node:child_process';
 import { _electron as electron } from 'playwright';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// 与当前源码版本一致，升级补丁版时同样校验安装包，避免测试固定在旧版本。
+const expectedVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 const require = createRequire(import.meta.url);
 const packaged = Boolean(process.argv[2]);
 const executablePath = packaged ? path.resolve(process.argv[2]) : require('electron');
@@ -41,7 +43,7 @@ async function quit(instance) {
 try {
   let started = await start(); desktop = started.instance; let page = started.page;
   const info = await desktop.evaluate(({ app }) => ({ userData: app.getPath('userData'), appPath: app.getAppPath(), version: app.getVersion(), node: process.versions.node, electron: process.versions.electron, packaged: app.isPackaged }));
-  assert.equal(info.userData, dataDir); assert.equal(info.version, '1.1.0'); assert.equal(info.packaged, packaged);
+  assert.equal(info.userData, dataDir); assert.equal(info.version, expectedVersion); assert.equal(info.packaged, packaged);
   report.runtime = info;
   const base = new URL(page.url()).origin;
   const health = await (await fetch(base + '/api/health')).json();

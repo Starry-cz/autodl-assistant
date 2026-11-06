@@ -23,6 +23,8 @@ const forbidden = async () => { report.forbiddenCallCount++; throw Error('整合
 
 try {
   const adapter = createObservatoryFixtureAdapter();
+  let currentAccount = { accountId: 'synthetic-workspace-account', subAccountId: null,
+    displayName: '合成工作账号', kind: 'main' };
   let session = { state: 'not_open', browserOpen: false, checkedAt: null, label: '尚未连接', message: '合成登录流程，未打开真实浏览器' };
   adapter.sessionStatus = () => ({ ...session });
   adapter.login = async () => {
@@ -33,8 +35,7 @@ try {
     session = { state: 'ready', browserOpen: true, checkedAt: Date.now(), readySince: Date.now(), label: '已核验', message: '合成账号登录已核验' };
     return { session: { ...session }, message: session.message };
   };
-  adapter.readIdentity = async () => normalizeAccountIdentity({ accountId: 'synthetic-workspace-account', subAccountId: null,
-    displayName: '合成工作账号', kind: 'main' }, { now: Date.now() });
+  adapter.readIdentity = async () => normalizeAccountIdentity(currentAccount, { now: Date.now() });
   adapter.marketHosts = async ({ model, region }) => ({ checkedAt: Date.now(), complete: true, rows: [
     { hostId: 'synthetic-workspace-host', hostNumber: '合成 922 机', model: 'RTX 4090', region: '北京B区', available: 2, total: 8,
       pricePerHour: 1.98, status: '可用', disabled: false },
@@ -186,6 +187,42 @@ try {
       report.mobileAccountChecks.push({ viewportWidth: width, ...bounds, passed: true });
     }
   }
+  // 通过真实设置表单保存 A 的通知，再从合成登录会话切到 B；不直接改前端状态或表单加载标记。
+  await page.setViewportSize({ width: 1440, height: 1080 });
+  await view('dashboard');
+  await page.locator('#task-form [name=paidConsent]').check();
+  await view('settings');
+  await page.locator('#settings-form [name=webhookEnabled]').check();
+  await page.locator('#settings-form [name=webhookUrl]').fill('https://synthetic.invalid/account-a');
+  await page.locator('#settings-form [name=webhookToken]').fill('synthetic-account-a-webhook');
+  await page.locator('#settings-form [name=wechatEnabled]').check();
+  await page.locator('#settings-form [name=wechatToken]').fill('synthetic-account-a-wechat');
+  await page.locator('#settings-form [name=rememberCredentials]').uncheck();
+  await requestThrough('#settings-form button[type=submit]', '/api/notifications/settings');
+  await page.waitForFunction(() => document.querySelector('#settings-form [name=wechatToken]').value === '***');
+  assert.equal(await page.locator('#settings-form [name=webhookEnabled]').isChecked(), true);
+  assert.equal(await page.locator('#settings-form [name=wechatEnabled]').isChecked(), true);
+  currentAccount = { accountId: 'synthetic-workspace-account-b', subAccountId: null,
+    displayName: '合成账号 B', kind: 'main' };
+  await view('profile');
+  await requestThrough('#check-browser', '/api/browser/check');
+  await page.waitForFunction(() => appState.account?.identity?.displayName === '合成账号 B' && !window.workspaceSyncing);
+  await view('settings');
+  const displayedSettings = await page.locator('#settings-form').evaluate(form => ({
+    webhookEnabled: form.elements.webhookEnabled.checked, wechatEnabled: form.elements.wechatEnabled.checked,
+    webhookUrl: form.elements.webhookUrl.value, webhookToken: form.elements.webhookToken.value,
+    wechatToken: form.elements.wechatToken.value, rememberCredentials: form.elements.rememberCredentials.checked,
+  }));
+  // 后端换号关闭通知、清微信 Token，但保留停用的 Webhook；UI 必须完整反映当前服务端设置。
+  const expectedSettings = { webhookEnabled: false, wechatEnabled: false,
+    webhookUrl: '***', webhookToken: '***', wechatToken: '', rememberCredentials: false };
+  assert.deepEqual(app.store.publicState().settings, expectedSettings);
+  assert.deepEqual(displayedSettings, expectedSettings, '换账号后通知表单不能保留旧账号的开关或已清除凭据掩码');
+  assert.equal(await page.locator('#task-form [name=paidConsent]').isChecked(), false);
+  await requestThrough('#settings-form button[type=submit]', '/api/notifications/settings');
+  assert.equal(app.store.data.settings.webhookEnabled, false, '直接保存 B 的表单不能重新开启 A 的通知渠道');
+  assert.equal(app.store.data.settings.wechatEnabled, false);
+  report.accountSwitchSettings = { from: '合成工作账号', to: '合成账号 B', settingsMatchServer: true, consentCleared: true };
   assert.equal(report.taskPosts.length, 0);
   assert.equal(app.store.tasks().length, 0);
   assert.equal(report.forbiddenCallCount, 0);
@@ -193,9 +230,9 @@ try {
   assert.deepEqual(report.browserErrors, []);
   report.status = 'passed';
   report.checks = { loginAndIdentity: true, serialAutomaticSync: true, dashboardFocusedOnTasks: true,
-    budgetCredentialsDisclosure: true, sourceInstancesDisclosure: true, actionChoiceClearsConsent: true,
+    budgetCredentialsDisclosure: true, sourceInstancesDisclosure: true, actionChoiceClearsConsent: true, accountSwitchReloadsSettings: true,
     marketFixtureValues: { total: 96, available: 11, models: 6, regions: 6 }, marketSelectionOnlyFillsForm: true };
-  console.log('整合工作台 UI 验收通过：合成账号登录、串行自动同步、五页六宽度、手机账号入口、市场图表填表、执行方式清授权，零任务提交。');
+  console.log('整合工作台 UI 验收通过：合成账号登录、串行自动同步、五页六宽度、手机账号入口、市场图表填表、换号通知设置与费用授权，零任务提交。');
 } catch (error) {
   report.status = 'failed'; report.failure = error.message; throw error;
 } finally {

@@ -61,8 +61,10 @@ try {
     New-Item -ItemType Directory -Path $runtimePath -Force | Out-Null
     Write-Host '[4/4] 启动本地网页'
     # 后台隐藏运行，日志写入本安装的运行目录；只在确认服务就绪后打开网页。
-    $serverScript = Join-Path $projectRoot 'src/server.mjs'
-    $serverProcess = Start-Process -FilePath $nodeRuntime.Node -ArgumentList ('"' + $serverScript + '"') -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runtimePath 'server.log') -RedirectStandardError (Join-Path $runtimePath 'server-error.log')
+    # 由 Node 按字面路径创建后台和日志，避开 PowerShell 5.1 对方括号目录的通配符解析。
+    $backendPid = & $nodeRuntime.Node (Join-Path $PSScriptRoot 'start-background.mjs')
+    if ($LASTEXITCODE -ne 0) { throw '后台进程创建失败，请根据上方错误处理后重试。' }
+    $serverProcess = Get-Process -Id ([int]$backendPid) -ErrorAction Stop
     for ($attempt = 0; $attempt -lt 50; $attempt++) {
         $serverProcess.Refresh()
         if ($serverProcess.HasExited) { throw "后台启动失败，请查看 $runtimePath\server-error.log。" }

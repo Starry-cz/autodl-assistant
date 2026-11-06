@@ -1216,6 +1216,8 @@ export class AutoDLBrowserAdapter {
     const found = (await this.instances(t.config.gpuModel)).find(i => hasId(i, id)), instance = found && { ...found, id };
     if (!this.verifyIdentity(instance,t)) fail('INSTANCE','目标实例的地区/精确 GPU 型号/数量不匹配，或选中了源实例');
     if ((t.operation.baselineIds || []).includes(id)) fail('INSTANCE','目标实例已存在于提交前基线，请避免将原有实例错误绑定为此次新实例');
+    // 人工绑定同样遵守单任务归属，不能把另一个任务的目标当作本次提交的结果。
+    if (this.claimedIds(t).has(id)) fail('INSTANCE','目标实例已被其他任务绑定，请核对本次提交对应的实例');
     return {instanceId:id,acceptedAt:t.operation.at,manual:true};
   }
   // 重新读取完整实例列表，返回提交前基线之外的全部实例（不限型号，任何新增都不能当作“未创建”）。
