@@ -1,3 +1,4 @@
+import { goView, openAccountMenu } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -80,7 +81,7 @@ try {
       await Promise.allSettled(animations.map(animation => animation.finished));
     });
   };
-  const view = async name => { await page.locator('.nav-item[data-view="' + name + '"]').click(); await settleView(name); };
+  const view = async name => { await goView(page, name); await settleView(name); };
   const requestThrough = async (selector, pathname) => {
     const response = page.waitForResponse(result => new URL(result.url()).pathname === pathname && result.request().method() === 'POST');
     await page.locator(selector).click(); assert.equal((await response).status(), 200);
@@ -93,6 +94,8 @@ try {
   };
   await page.goto(base);
   await page.waitForFunction(() => document.querySelector('#connection').textContent === '已连接');
+  assert.equal(await page.locator('#workspace-navigation').isVisible(), true);
+  assert.equal(await page.locator('#settings-navigation').isVisible(), false);
   assert.equal(await page.locator('#dashboard #account-instances').count(), 0);
   assert.equal(await page.locator('#dashboard #wallet-form').count(), 0);
   assert.equal(await page.locator('#dashboard #autodl-connection').count(), 0);
@@ -111,6 +114,76 @@ try {
   const autoPaths = report.apiRequests.filter(item => ['/api/observatory/overview', '/api/observatory/billing', '/api/autodl/gpus'].includes(item));
   assert.deepEqual(autoPaths, ['/api/observatory/overview', '/api/observatory/billing', '/api/autodl/gpus']);
   report.loginAutoSync = autoPaths;
+
+  // 工作区只显示工作导航；账号、通知、账单和更新共享独立设置导航。
+  assert.equal(await page.locator('#profile #version-updates').count(), 0);
+  assert.equal(await page.locator('#updates #version-updates').count(), 1);
+  assert.deepEqual(await page.locator('#settings-navigation .nav-item[data-view]').evaluateAll(nodes => nodes.map(node => node.dataset.view)), ['profile', 'settings', 'billing', 'updates']);
+  assert.equal(await page.locator('#workspace-navigation [data-view="billing"], #workspace-navigation [data-view="settings"]').count(), 0);
+  await view('fleet');
+  await openAccountMenu(page);
+  assert.deepEqual(await page.locator('#account-menu [data-open-view]').evaluateAll(nodes => nodes.map(node => node.dataset.openView)), ['profile', 'billing', 'updates']);
+  assert.equal(await page.locator('#account-entry').getAttribute('aria-expanded'), 'true');
+  await page.screenshot({ path: path.join(output, 'account-menu-desktop.png'), animations: 'disabled' });
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#account-menu').isVisible(), false);
+  assert.equal(await page.locator('#account-entry').evaluate(node => node === document.activeElement), true);
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await page.locator('#account-menu [data-open-view="profile"]').evaluate(node => node === document.activeElement), true);
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await page.locator('#account-menu [data-open-view="billing"]').evaluate(node => node === document.activeElement), true);
+  await page.keyboard.press('End');
+  assert.equal(await page.locator('#account-menu [role="menuitem"]:not(:disabled)').last().evaluate(node => node === document.activeElement), true);
+  await page.keyboard.press('Home');
+  assert.equal(await page.locator('#account-menu [data-open-view="profile"]').evaluate(node => node === document.activeElement), true);
+  await page.keyboard.press('Escape');
+  await openAccountMenu(page);
+  await page.locator('.breadcrumb').click();
+  assert.equal(await page.locator('#account-menu').isVisible(), false);
+  for (const name of ['profile', 'settings', 'billing']) {
+    await view(name);
+    assert.equal(await page.locator('#workspace-navigation').isVisible(), false);
+    assert.equal(await page.locator('#settings-navigation').isVisible(), true);
+    assert.equal(await page.locator('#account-menu').isVisible(), false);
+    assert.deepEqual(await page.locator('.nav-item[aria-current="page"]').evaluateAll(nodes => nodes.map(node => node.dataset.view)), [name]);
+    assert.equal(new URL(page.url()).hash, '#' + name);
+  }
+  await openAccountMenu(page);
+  await page.locator('#account-menu-updates').click();
+  await settleView('updates');
+  assert.equal(await page.locator('#profile').isVisible(), false);
+  assert.equal(new URL(page.url()).hash, '#updates');
+  const updatesBounds = await page.locator('#version-updates').boundingBox();
+  assert.ok(updatesBounds && updatesBounds.y >= 0 && updatesBounds.y < 1036, '版本入口应定位到当前视口');
+  // 同一页面的历史记录应恢复对应导航区；返回工作台应恢复进入设置前的实例页。
+  await page.goBack(); await settleView('billing');
+  assert.equal(new URL(page.url()).hash, '#billing');
+  await page.goForward(); await settleView('updates');
+  assert.equal(new URL(page.url()).hash, '#updates');
+  await page.goto(base + '#profile'); await settleView('profile');
+  assert.equal(await page.locator('#settings-navigation').isVisible(), true);
+  await page.locator('#back-to-workspace').click(); await settleView('fleet');
+  assert.equal(await page.locator('#workspace-navigation').isVisible(), true);
+  assert.equal(await page.locator('#settings-navigation').isVisible(), false);
+  assert.equal(new URL(page.url()).hash, '#fleet');
+  await page.goBack(); await settleView('profile');
+  assert.equal(await page.locator('#settings-navigation').isVisible(), true);
+  await page.goForward(); await settleView('fleet');
+  assert.equal(await page.locator('#workspace-navigation').isVisible(), true);
+  // 菜单退出继续使用既有确认流程，取消不能改变账号、任务或发出退出请求。
+  const beforeCancel = { owner: app.store.data.accountOwnerId, tasks: JSON.stringify(app.store.tasks()),
+    logoutRequests: report.apiRequests.filter(item => item === '/api/browser/logout').length };
+  await openAccountMenu(page);
+  await page.locator('#account-menu-logout').click();
+  await page.locator('#logout-dialog').waitFor({ state: 'visible' });
+  await page.locator('#logout-cancel').click();
+  assert.equal(await page.locator('#logout-dialog').isVisible(), false);
+  assert.equal(app.store.data.accountOwnerId, beforeCancel.owner);
+  assert.equal(JSON.stringify(app.store.tasks()), beforeCancel.tasks);
+  assert.equal(report.apiRequests.filter(item => item === '/api/browser/logout').length, beforeCancel.logoutRequests);
+  report.accountMenu = { navigation: true, keyboard: true, escapeFocus: true, outsideClick: true,
+    separateSettingsNavigation: true, separateUpdatesPage: true, history: true, hashNavigation: true,
+    restoresWorkspace: true, cancelPreservesAccount: true };
 
   await view('overview');
   assert.equal(await page.locator('#market-total').innerText(), '96');
@@ -169,10 +242,10 @@ try {
   await page.locator('#fleet-sources > summary').click();
   await page.locator('#toast').waitFor({ state: 'hidden' });
 
-  // 完整覆盖新五页的六种宽度；图表内部滚动不应扩大整页宽度。
+  // 覆盖工作页和设置页的六种宽度；图表内部滚动不应扩大整页宽度。
   for (const width of report.widths) {
     await page.setViewportSize({ width, height: width <= 390 ? 844 : 1080 });
-    for (const name of ['overview', 'fleet', 'billing', 'profile', 'dashboard']) {
+    for (const name of ['overview', 'fleet', 'billing', 'profile', 'settings', 'updates', 'dashboard']) {
       await view(name);
       const geometry = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth }));
       assert.ok(geometry.document <= geometry.viewport + 1, name + ' ' + width + 'px 整页横向溢出：' + JSON.stringify(geometry));
@@ -180,12 +253,17 @@ try {
       await screenshot(name, width);
     }
     if (width <= 390) {
-      await page.locator('#account-entry').click(); await settleView('profile');
+      await view('profile');
       const bounds = await page.locator('#account-entry').boundingBox();
       assert.ok(bounds && bounds.width >= 40 && bounds.height >= 40, '手机账号入口需要可点击尺寸');
       assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width + 1, '手机账号入口应处于屏幕内');
       assert.equal(await page.locator('#profile-name').innerText(), '合成工作账号');
-      report.mobileAccountChecks.push({ viewportWidth: width, ...bounds, passed: true });
+      await openAccountMenu(page);
+      const menuBounds = await page.locator('#account-menu').boundingBox();
+      assert.ok(menuBounds && menuBounds.x >= 0 && menuBounds.x + menuBounds.width <= width + 1, '手机账号菜单应处于屏幕内');
+      if (width === 320) await page.screenshot({ path: path.join(output, 'account-menu-mobile.png'), animations: 'disabled' });
+      await page.keyboard.press('Escape');
+      report.mobileAccountChecks.push({ viewportWidth: width, ...bounds, menuBounds, passed: true });
     }
   }
   // 通过真实设置表单保存 A 的通知，再从合成登录会话切到 B；不直接改前端状态或表单加载标记。
@@ -233,7 +311,7 @@ try {
   report.checks = { loginAndIdentity: true, serialAutomaticSync: true, dashboardFocusedOnTasks: true,
     budgetCredentialsDisclosure: true, sourceInstancesDisclosure: true, actionChoiceClearsConsent: true, accountSwitchReloadsSettings: true,
     marketFixtureValues: { total: 96, available: 11, models: 6, regions: 6 }, marketSelectionOnlyFillsForm: true };
-  console.log('整合工作台 UI 验收通过：合成账号登录、串行自动同步、五页六宽度、手机账号入口、市场图表填表、换号通知设置与费用授权，零任务提交。');
+  console.log('整合工作台 UI 验收通过：合成账号登录、串行自动同步、独立设置导航与更新页、历史切换、七页六宽度、手机账号入口、市场图表填表、换号通知设置与费用授权，零任务提交。');
 } catch (error) {
   report.status = 'failed'; report.failure = error.message; throw error;
 } finally {

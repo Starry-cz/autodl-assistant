@@ -1,3 +1,4 @@
+import { goView } from './ui-navigation.mjs';
 import { syntheticImageOptions, selectSyntheticImage } from '../tests/fixtures/images.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -44,7 +45,7 @@ try {
  await page.goto(base);await page.waitForFunction(()=>document.querySelector('#connection').textContent==='已连接');
  const form=page.locator('#task-form'),field=name=>form.locator('[name='+name+']');
  // 来源、预算凭据与登录各归所属页面，仍通过真实导航和折叠按钮操作。
- const view=async name=>{await page.locator('[data-view='+name+']').click();await page.locator('#'+name).waitFor({state:'visible'});};
+ const view=async name=>{await goView(page, name);await page.locator('#'+name).waitFor({state:'visible'});};
  const expand=async id=>{if(!await page.locator('#'+id).evaluate(node=>node.open))await page.locator('#'+id+' > summary').click();};
  const sourcePanel=async()=>{await view('fleet');await expand('fleet-sources');};
  const walletPanel=async()=>{await view('billing');await expand('billing-budget-credentials');await expand('wallet-options');};

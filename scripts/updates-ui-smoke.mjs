@@ -1,3 +1,4 @@
+import { goView, openAccountMenu } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -52,16 +53,18 @@ try {
       const page = await context.newPage();
       page.on('pageerror', error => report.errors.push(error.message));
       await page.goto(base);
-      await page.locator('#account-entry').click();
+      await openAccountMenu(page); await page.locator('#account-menu-updates').click();
+      await page.locator('#updates').waitFor({ state: 'visible' });
+      assert.equal(await page.locator('#profile #version-updates').count(), 0);
       await page.locator('#version-updates').waitFor({ state: 'visible' });
       await page.waitForFunction(() => document.querySelector('#update-check').disabled);
       assert.match(await page.locator('#update-status').innerText(), /检查/);
       // 网络等待不应卡住界面切页，也不能更改后台任务。
-      await page.locator('[data-view="dashboard"]').first().click();
+      await goView(page, 'dashboard');
       await page.locator('#dashboard').waitFor({ state: 'visible' });
       assert.equal(app.store.tasks().length, 0);
       unblock();
-      await page.locator('#account-entry').click();
+      await openAccountMenu(page); await page.locator('#account-menu-updates').click();
       await page.waitForFunction(() => document.querySelector('#update-latest-version').textContent.includes('99.0.0'));
       assert.match(await page.locator('#update-current-version').innerText(), new RegExp(current.replaceAll('.', '\\.')));
       assert.equal(await page.locator('#account-update-badge').isVisible(), true);
@@ -149,7 +152,12 @@ try {
       installation = {status:'error',targetVersion:'99.0.0',message:'合成下载失败，旧后台继续运行'};
       await page.waitForFunction(() => /失败/.test(document.querySelector('#update-installation').textContent));
       assert.equal(await page.locator('#update-install').isEnabled(),true);
+      const retryResponse = page.waitForResponse(response => response.url() === base + '/api/updates/install' && response.request().method() === 'POST');
       await page.locator('#update-install').click();
+      await retryResponse;
+      // 等本次重试的准备状态进入页面缓存，避免沿用上次失败状态后才推进时间。
+      await page.evaluate(() => refresh());
+      await page.waitForFunction(() => appState.updates.installation.status === 'preparing');
       // 时间推进只作用于测试页面，验证超时提示不会被普通状态刷新覆盖。
       await page.waitForFunction(() => document.querySelector('#update-install').disabled);
       await page.evaluate(() => { window.originalDateNow = Date.now; Date.now = () => window.originalDateNow() + 21 * 60 * 1000; });

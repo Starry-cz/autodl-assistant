@@ -1,3 +1,4 @@
+import { goView } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -5,17 +6,22 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { _electron as electron } from 'playwright';
+import { once } from 'node:events';
+import { _electron as electron, chromium } from 'playwright';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // 与当前源码版本一致，升级补丁版时同样校验安装包，避免测试固定在旧版本。
 const expectedVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 const require = createRequire(import.meta.url);
 const packaged = Boolean(process.argv[2]);
-const executablePath = packaged ? path.resolve(process.argv[2]) : require('electron');
+const sourceExecutable = packaged ? path.resolve(process.argv[2]) : require('electron');
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autodl-desktop-check-'));
+// Playwright 启动内置浏览器会写依赖验证标记；打包验收必须运行独立副本，不改发布构建目录。
+const packagedCopy = path.join(dataDir, 'application');
+if (packaged) fs.cpSync(path.dirname(sourceExecutable), packagedCopy, { recursive: true });
+const executablePath = packaged ? path.join(packagedCopy, path.basename(sourceExecutable)) : sourceExecutable;
 const args = packaged ? [] : [root];
 const loader = path.join(path.dirname(require.resolve('playwright-core/package.json')), 'lib', 'server', 'electron', 'loader.js');
-const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autodl-desktop-check-'));
 const output = path.join(root, 'output', 'playwright');
 fs.mkdirSync(output, { recursive: true });
 // 测试使用全新账号目录，并移除全局 Node 与浏览器路径；不接触真实 8787 或 AutoDL 账号。
@@ -23,8 +29,8 @@ fs.writeFileSync(path.join(dataDir, 'tray-hint-shown'), '');
 const env = { ...process.env, AUTODL_DESKTOP_DATA_DIR: dataDir, AUTODL_BROWSER_CHANNEL: 'not-a-real-channel', PLAYWRIGHT_BROWSERS_PATH: path.join(dataDir, 'missing-browser-cache') };
 for (const key of Object.keys(env)) if (/^path$/i.test(key) || key === 'ELECTRON_RUN_AS_NODE') delete env[key];
 env.Path = [path.join(process.env.SystemRoot, 'System32'), process.env.SystemRoot].join(';');
-const report = { packaged, executablePath, dataDir, checks: [], passed: false };
-let desktop;
+const report = { packaged, sourceExecutable, executablePath, dataDir, checks: [], passed: false };
+let desktop, nativeDesktop, nativeBase;
 const pass = label => { report.checks.push(label); console.log('PASS ' + label); };
 
 async function start() {
@@ -36,8 +42,63 @@ async function start() {
 }
 async function quit(instance) {
   const closed = instance.waitForEvent('close', { timeout: 60000 });
+  // 调试连接关闭可能早于 Electron 退出；等系统进程结束后再启动，确保单实例锁已释放。
+  const exited = once(instance.process(), 'exit');
   await instance.evaluate(({ Menu }) => { setTimeout(() => Menu.getApplicationMenu().getMenuItemById('desktop-quit').click(), 0); });
   await closed;
+  await exited;
+}
+async function restartNative() {
+  const logFile = path.join(dataDir, 'desktop.log');
+  const logOffset = fs.readFileSync(logFile, 'utf8').length;
+  let watcher, timer;
+  // 桌面启动日志写在 loadURL 与 showWindow 完成之后；等待这条实际事件，不猜测启动时长。
+  const ready = new Promise((resolve, reject) => {
+    watcher = fs.watch(logFile, () => {
+      const added = fs.readFileSync(logFile, 'utf8').slice(logOffset);
+      if (added.includes('桌面版已启动')) resolve();
+    });
+    watcher.once('error', reject);
+  });
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('原生桌面启动未完成，请查看本次临时目录中的 desktop.log')), 60000);
+  });
+  // 只连接 Chromium 读取页面持久化数据，不再注入 Electron loader 或启动 Node 调试握手。
+  nativeDesktop = spawn(executablePath, ['--remote-debugging-port=0', ...args], { cwd: root, env, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  const debugging = new Promise(resolve => {
+    let output = '';
+    nativeDesktop.stderr.setEncoding('utf8');
+    nativeDesktop.stderr.on('data', chunk => {
+      output += chunk;
+      const endpoint = output.match(/DevTools listening on (ws:\/\/[^\r\n]+)/)?.[1];
+      if (endpoint) resolve(endpoint);
+    });
+  });
+  const exitedBeforeReady = once(nativeDesktop, 'exit').then(([code]) => { throw new Error('原生桌面启动提前退出：' + code); });
+  try {
+    const [, endpoint] = await Promise.race([Promise.all([ready, debugging]), exitedBeforeReady, deadline]);
+    return endpoint;
+  }
+  finally { watcher.close(); clearTimeout(timer); }
+}
+async function nativeRequest(pathname, data) {
+  const health = await (await fetch(nativeBase + '/api/health')).json();
+  assert.equal(health.pid, nativeDesktop.pid);
+  assert.equal(health.runtimeDir, path.join(dataDir, 'runtime'));
+  const html = await (await fetch(nativeBase + '/')).text();
+  const token = html.match(/name="local-token" content="([0-9a-f]+)"/)?.[1];
+  assert.ok(token, '原生桌面页面缺少本地访问令牌');
+  return fetch(nativeBase + pathname, { method: data ? 'POST' : 'GET',
+    headers: { 'X-Local-Token': token, 'Content-Type': 'application/json' },
+    ...(data ? { body: JSON.stringify(data) } : {}), signal: AbortSignal.timeout(15000) });
+}
+async function quitNative() {
+  const exited = once(nativeDesktop, 'exit', { signal: AbortSignal.timeout(60000) });
+  const response = await nativeRequest('/api/server/stop', { confirm: true });
+  assert.equal(response.status, 202);
+  const [code] = await exited;
+  assert.equal(code, 0);
+  nativeDesktop = null;
 }
 
 try {
@@ -83,13 +144,17 @@ try {
   });
   assert.equal(credentialsWork, true); pass('内置运行时可保存与读取系统保护的凭据');
 
-  for (const view of ['overview', 'dashboard', 'fleet', 'billing', 'notifications', 'ai', 'settings', 'profile']) {
-    await page.locator('[data-view="' + view + '"]').first().click();
+  for (const view of ['overview', 'dashboard', 'fleet', 'billing', 'notifications', 'ai', 'settings', 'profile', 'updates']) {
+    await goView(page, view);
     await page.waitForFunction(view => document.querySelector('[data-view="' + view + '"]').classList.contains('active'), view);
   }
-  await page.locator('[data-view="overview"]').first().click();
+  await goView(page, 'overview');
   await page.screenshot({ path: path.join(output, 'desktop-' + (packaged ? 'packaged' : 'dev') + '.png'), animations: 'disabled' });
   await page.evaluate(() => localStorage.setItem('desktop-smoke-persistence', 'saved'));
+  // 通过产品接口保存关闭发送的合成通知凭据，重启后验证真实数据恢复与 DPAPI 解密。
+  await page.evaluate(() => api('/api/notifications/settings', { webhookEnabled: false,
+    webhookUrl: 'https://synthetic.invalid/desktop-smoke', webhookToken: 'desktop-smoke-synthetic-token',
+    wechatEnabled: false, wechatToken: '', rememberCredentials: true }));
   pass('所有页面可打开，现有界面保持不变');
   await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
   assert.equal(await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()), false);
@@ -111,12 +176,36 @@ try {
   await assert.rejects(fetch(base + '/api/health'));
   pass('菜单退出等待后台关闭并释放运行锁');
 
-  started = await start(); desktop = started.instance; page = started.page;
-  assert.equal(await page.evaluate(() => localStorage.getItem('desktop-smoke-persistence')), 'saved');
-  pass('再次打开保留桌面用户数据');
-  await quit(desktop); desktop = null;
+  const savedState = JSON.parse(fs.readFileSync(path.join(dataDir, 'runtime', 'state.json'), 'utf8'));
+  assert.equal(savedState.protectedSecrets.method, 'windows-dpapi-current-user');
+  assert.equal(savedState.settings.webhookToken, undefined);
+  nativeBase = base;
+  const endpoint = await restartNative();
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dataDir, 'local-port.json'), 'utf8')).port, Number(new URL(base).port));
+  const restartedHealth = await (await fetch(nativeBase + '/api/health')).json();
+  assert.equal(restartedHealth.pid, nativeDesktop.pid);
+  assert.equal(restartedHealth.ready, true);
+  assert.equal(restartedHealth.version, expectedVersion);
+  const restartedBrowser = await chromium.connectOverCDP(endpoint, { timeout: 15000 });
+  try {
+    const restoredPage = restartedBrowser.contexts()[0].pages().find(candidate => new URL(candidate.url()).origin === base);
+    assert.ok(restoredPage, '原生重启需要恢复同一来源的桌面页面');
+    assert.equal(await restoredPage.evaluate(() => localStorage.getItem('desktop-smoke-persistence')), 'saved');
+  } finally { await restartedBrowser.close(); }
+  const restoredState = await (await nativeRequest('/api/state')).json();
+  assert.equal(restoredState.settings.rememberCredentials, true);
+  assert.equal(restoredState.settings.webhookEnabled, false);
+  assert.equal(restoredState.settings.webhookUrl, '***');
+  assert.equal(restoredState.settings.webhookToken, '***');
+  assert.deepEqual(restoredState.tasks, []);
+  pass('原生重启：版本与端口一致，localStorage 与 DPAPI 加密设置恢复，未创建任务');
+  await quitNative();
+  assert.equal(fs.existsSync(path.join(dataDir, 'runtime', 'server.lock')), false);
+  await assert.rejects(fetch(base + '/api/health'));
+  pass('原生重启后正常停止桌面进程与后台');
   report.passed = true;
 } finally {
   if (desktop) await quit(desktop).catch(() => {});
+  if (nativeDesktop && nativeDesktop.exitCode === null) await quitNative().catch(error => console.error('原生测试进程收尾失败：' + error.message));
   fs.writeFileSync(path.join(output, 'desktop-' + (packaged ? 'packaged' : 'dev') + '-report.json'), JSON.stringify(report, null, 2));
 }

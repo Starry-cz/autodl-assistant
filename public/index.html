@@ -10,27 +10,45 @@
 <body>
   <aside class="sidebar">
     <a class="brand" href="/" aria-label="AutoDL 抢卡助手首页"><span class="brand-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 3v3m6-3v3M9 18v3m6-3v3M3 9h3m-3 6h3m12-6h3m-3 6h3"/></svg></span><span>AutoDL 助手<small>本地工作台</small></span></a>
-    <div class="nav-label">工作空间</div>
+    <div id="workspace-navigation">
+    <div class="nav-label">工作台</div>
     <!-- 导航按钮保留 data-view 合同；窄屏在同一行横向浏览。 -->
     <nav class="workspace-nav" aria-label="工作空间">
     <button class="nav-item active" data-view="overview" aria-current="page"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4M6 11h3l2-4 3 7 2-3h2"/></svg></span>监控室</button>
     <button class="nav-item" data-view="dashboard"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>抢卡控制台</button>
     <button class="nav-item" data-view="fleet"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01M11 6.5h6m-6 11h6"/></svg></span>我的实例</button>
-    <button class="nav-item" data-view="billing"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 7h6m-6 4h6m-6 4h3"/></svg></span>账单</button>
     <button class="nav-item" data-view="notifications"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg></span>消息中心 <b id="unread" class="count">0</b></button>
     <button class="nav-item" data-view="ai"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 2.6 6.4L21 12l-6.4 2.6L12 21l-2.6-6.4L3 12l6.4-2.6L12 3Z"/><path d="M20 2v4m-2-2h4"/></svg></span>AI 选卡 <small>可选</small></button>
-    <button class="nav-item" data-view="settings"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9.5 3-.7 2.3-2 .9L4.5 6l-2 3.5L4 11.2v2L2.5 15l2 3.5 2.3-.2 2 .9.7 2.3h5l.7-2.3 2-.9 2.3.2 2-3.5-1.5-1.8v-2l1.5-1.7-2-3.5-2.3.2-2-.9-.7-2.3h-5Z"/><circle cx="12" cy="12" r="3"/></svg></span>通知设置</button>
     </nav>
-    <!-- 账号入口固定在侧栏底部；手机保留右上角头像入口。 -->
+    </div>
+    <!-- 设置使用独立的侧栏层级；data-view 仍唯一，供页面跳转和跟踪状态判断。 -->
+    <div id="settings-navigation" hidden>
+      <button id="back-to-workspace" class="back-to-workspace" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m10 6-6 6 6 6M4 12h16"/></svg>返回工作台</button>
+      <div class="nav-label">设置中心</div>
+      <nav class="settings-nav" aria-label="设置中心">
+        <button class="nav-item" data-view="profile"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg></span>账号设置</button>
+        <button class="nav-item" data-view="settings"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg></span>通知</button>
+        <button class="nav-item" data-view="billing"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 7h6m-6 4h6m-6 4h3"/></svg></span>账单</button>
+        <button class="nav-item" data-view="updates"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M5 8a7.5 7.5 0 0 1 12.5-3L20 8M4 16l2.5 3A7.5 7.5 0 0 0 19 16"/></svg></span>软件更新<span id="settings-update-dot" class="settings-update-dot" aria-label="有新版本" hidden></span></button>
+      </nav>
+    </div>
+    <!-- 头像菜单仅保留三个常用快捷入口，通知配置归入设置中心。 -->
     <div class="sidebar-bottom">
-      <button id="account-entry" class="nav-item account-entry" type="button" data-view="profile" aria-label="打开账号页面">
-        <span id="account-avatar" class="account-avatar" aria-hidden="true">AD</span><span class="account-copy"><strong id="account-name">登录 AutoDL</strong><small id="account-status">尚未连接</small></span><span class="account-chevron" aria-hidden="true">›</span>
+      <div id="account-menu" class="account-menu" role="menu" aria-label="账号与设置" hidden>
+        <button class="account-menu-item" type="button" data-open-view="profile" role="menuitem" tabindex="-1"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg></span>账号设置</button>
+        <button class="account-menu-item" type="button" data-open-view="billing" role="menuitem" tabindex="-1"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 7h6m-6 4h6m-6 4h3"/></svg></span>账单</button>
+        <button id="account-menu-updates" class="account-menu-item" type="button" data-open-view="updates" role="menuitem" tabindex="-1"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M5 8a7.5 7.5 0 0 1 12.5-3L20 8M4 16l2.5 3A7.5 7.5 0 0 0 19 16"/></svg></span>软件更新<span id="account-menu-update-badge" class="menu-update-badge" hidden>有新版本</span></button>
+        <div class="account-menu-divider" role="separator"></div>
+        <button id="account-menu-logout" class="account-menu-item account-menu-logout" type="button" role="menuitem" tabindex="-1"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4m7-12 4 4-4 4M8 12h12"/></svg></span>退出 AutoDL</button>
+      </div>
+      <button id="account-entry" class="nav-item account-entry" type="button" aria-label="打开账号菜单" aria-haspopup="menu" aria-expanded="false" aria-controls="account-menu">
+        <span id="account-avatar" class="account-avatar" aria-hidden="true">AD</span><span class="account-copy"><strong id="account-name">登录 AutoDL</strong><small id="account-status">账号与设置</small></span><span class="account-chevron" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m8 9 4-4 4 4m-8 6 4 4 4-4"/></svg></span>
         <span id="account-update-badge" class="account-update-badge" hidden>有新版本</span>
       </button>
     </div>
   </aside>
   <main>
-    <header class="topbar"><span class="breadcrumb">AutoDL 抢卡助手 <span>/</span> <b id="view-title">监控室</b></span><div class="top-actions"><span id="clock"></span><button id="desktop-notify" class="button small">开启桌面提醒</button></div></header>
+    <header class="topbar"><span class="breadcrumb"><span id="nav-context">工作台</span><span>/</span><b id="view-title">监控室</b></span><div class="top-actions"><span id="clock"></span><button id="desktop-notify" class="button small">开启桌面提醒</button></div></header>
     <div id="stale-backend" class="notice stale-backend" role="alert" hidden></div>
     <section id="dashboard" class="view hidden">
   <div class="utility-heading"><div><h1>抢卡控制台</h1><p>新租服务器，或等待原实例有卡开机。</p></div><span class="scope-label">AutoDL · 普通容器实例</span></div>
@@ -105,7 +123,7 @@
 </section>
 <!-- 登录操作集中在账号页，原有登录与状态元素 ID 保持不变。 -->
 <section id="profile" class="view hidden">
-  <div class="page-heading"><div><h1>账号</h1><p>管理 AutoDL 登录与本机连接状态。</p></div><button id="profile-sync" type="button" class="button">同步账号内容</button></div>
+  <div class="page-heading"><div><h1>账号设置</h1><p>连接 AutoDL，管理登录与账号同步。</p></div><button id="profile-sync" type="button" class="button">同步账号内容</button></div>
   <div class="profile-identity"><span class="profile-avatar" aria-hidden="true">AD</span><div><h2 id="profile-name">登录 AutoDL</h2><p id="profile-id">尚未读取账号信息</p><span id="profile-status" class="badge neutral">尚未连接</span></div></div>
   <p id="profile-sync-status" class="hint" role="status" aria-live="polite">登录后同步账号资料、实例、账单与 GPU 目录。</p>
   <p id="profile-legacy-note" class="notice" hidden></p>
@@ -115,10 +133,11 @@
   <div class="browser-bottom"><p id="browser-checked-at" class="browser-meta">尚未核验；打开浏览器不代表已登录。</p><details class="connection-help"><summary>登录帮助</summary><ol class="browser-steps" aria-label="AutoDL 连接步骤"><li>打开登录窗口</li><li>在 AutoDL 完成登录</li><li>自动返回助手并同步</li></ol><p class="browser-footnote">登录完成后自动转入后台，无需保留官网窗口。登录过期时点头像重新登录；资料保存在本机。退出会暂停任务并清除本机专用浏览器会话，云端实例不受影响。</p></details></div>
   <p id="browser-busy" class="browser-busy hidden">后台正在操作页面；请稍后重试或先暂停任务。</p>
 </section>
-  <section class="profile-local"><h2>本机运行状态</h2><p><span class="online-dot"></span>本地服务 <span id="connection">连接中</span></p><p class="hint">监测由本机服务持续运行。关闭网页不会停止任务，电脑休眠或服务退出后会停止监测。</p><p class="profile-version">本地改造版 · 普通容器实例</p></section>
+</section>
+<section id="updates" class="view hidden">
+  <div class="page-heading"><div><h1 id="updates-title">软件更新</h1><p>查看当前版本，获取最新功能与修复。</p></div><button id="update-check" type="button" class="button">检查更新</button></div>
   <!-- 主按钮完成下载和后台交接；手动下载入口保留给离线安装或换电脑。 -->
   <section id="version-updates" class="profile-updates" aria-labelledby="updates-title">
-    <div class="updates-heading"><div><h2 id="updates-title">版本与更新</h2><p>自动检查正式版本，也可随时手动检查。</p></div><button id="update-check" type="button" class="button">检查更新</button></div>
     <div class="updates-panel">
       <div class="updates-overview">
         <dl class="updates-versions"><div><dt>当前版本 <span id="update-channel"></span></dt><dd id="update-current-version">读取中…</dd></div><div><dt>最新正式版</dt><dd id="update-latest-version">尚未检查</dd></div></dl>
@@ -130,6 +149,7 @@
       <details id="update-notes" class="updates-notes" hidden><summary>查看更新说明</summary><p id="update-release-notes"></p></details>
     </div>
   </section>
+  <section class="profile-local"><h2>本机运行状态</h2><p><span class="online-dot"></span>本地服务 <span id="connection">连接中</span></p><p class="hint">关闭网页后任务继续运行；电脑休眠或本地服务退出后，监测会停止。</p></section>
 </section>
 <!-- 新增页面只展示读取结果；开机等付费操作仍回到原任务表单确认。 -->
 <section id="overview" class="view">
@@ -217,7 +237,7 @@
 <section id="notifications" class="view hidden"><div class="page-heading"><div><h1>消息中心</h1><p>资源命中、完成、失败和需要操作时，在这里查看。</p></div><button id="read-notifications" class="button">全部标为已读</button></div><section class="panel" id="notification-list"></section></section>
     <!-- 两个通知渠道共用一张表单；字段名保持不变，继续使用原来的保存接口。 -->
     <section id="settings" class="view settings-view hidden">
-      <div class="page-heading"><div><h1>通知设置</h1><p>站内消息始终开启，也可以通过 Webhook 或 AutoDL 微信接收提醒。</p></div></div>
+      <div class="page-heading"><div><h1>通知</h1><p>选择任务提醒的接收方式。站内消息始终开启。</p></div></div>
       <section class="panel settings-panel">
         <form id="settings-form">
           <div class="settings-channels">

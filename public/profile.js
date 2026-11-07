@@ -8,7 +8,7 @@
   function renderProfile(){
     const identity=current(), ready=connected(), session=appState.browser?.session;
     $('#account-name').textContent=identity?.displayName || (ready?'AutoDL 账号':'登录 AutoDL');
-    $('#account-status').textContent=syncing?'正在同步账号内容':ready?(session?.background?'后台已连接 · 管理账号':'已连接 · 管理账号'):session?.browserOpen?'等待登录与核验':'连接你的工作空间';
+    $('#account-status').textContent=syncing?'正在同步账号内容':ready?(session?.background?'后台已连接':'账号已连接'):session?.browserOpen?'等待登录与核验':'账号与设置';
     $('#account-avatar').textContent=identity?.displayName?.slice(0,1).toUpperCase() || 'AD';
     $('#profile .profile-avatar').textContent=$('#account-avatar').textContent;
     $('#profile-name').textContent=identity?.displayName || '连接你的 AutoDL 账号';

@@ -79,7 +79,10 @@ test('源码与在线安装升级：保留资料、旧入口转发、拒绝降�
   const archiveServer = http.createServer((req,res)=>{res.writeHead(200,{'Content-Type':'application/zip'});fs.createReadStream(zip).pipe(res);});
   await new Promise(resolve=>archiveServer.listen(0,'127.0.0.1',resolve));
   const installer = path.join(directory,'install-fixture.ps1');
-  const script = fs.readFileSync(path.join(ROOT,'install.ps1'),'utf8').replace(/^\$downloadUrl = .+$/m,`$downloadUrl = 'http://127.0.0.1:${archiveServer.address().port}/release.zip'`);
+  // 安装器测试副本与本地假发布包固定使用同一版本，正式发布版本变化不影响该升级场景。
+  const script = fs.readFileSync(path.join(ROOT,'install.ps1'),'utf8')
+    .replace(/^\$releaseVersion = .+$/m,"$releaseVersion = '1.3.0'")
+    .replace(/^\$downloadUrl = .+$/m,`$downloadUrl = 'http://127.0.0.1:${archiveServer.address().port}/release.zip'`);
   fs.writeFileSync(installer,script);
   try {
     result = await ps(installer,['-InstallDir',onlineRoot,'-NoOpen','-NoShortcut'],onlineEnv,directory);

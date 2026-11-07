@@ -197,6 +197,7 @@ function renderBrowser(){
   $('#check-browser').textContent=browserAction==='check'||checking?'正在检查…':'检查登录状态';
   $('#logout-browser').disabled=busy||!!appState.browser?.busy;
   $('#logout-browser').textContent=browserAction==='logout'?'正在退出…':'退出 AutoDL';
+  $('#account-menu-logout').disabled=$('#logout-browser').disabled || (!ready&&!session.browserOpen);
   $('#check-browser').title=session.browserOpen?'只读检查，不会租用 GPU':'请先打开专用浏览器';
   $('#browser-busy').classList.toggle('hidden',!appState.browser?.busy||!!browserAction||checking);
   $('#live-note').textContent=ready?(currentMode==='boot'?'沿用原 GPU、地区与计费方式。无卡运行中的实例，请先到 AutoDL 手动关机。':'已连接 AutoDL，可选择仅提醒或自动执行。'):'点击左下角账号入口连接 AutoDL，再开始监测。';
@@ -310,14 +311,74 @@ async function perform(command,id,data={}){
     toast(command==='attach'?'目标实例已绑定':command==='recheck'?(result.result?.cleared?'核对完成：没有新增实例，已清除此次提交记录':'实例列表有提交前没有的实例 '+(result.result?.extra||[]).map(i=>i.id).slice(0,3).join('、')+'，请核对后绑定'):'任务已更新',command==='recheck'&&!result.result?.cleared);
     await refresh();}catch(e){toast(e.message,true);}
 }
-$$('.nav-item').forEach(button=>button.addEventListener('click',()=>{
-  // 切页后回到标题，避免长表单的滚动位置让新页面从中间显示。
-  $$('.nav-item').forEach(b=>{b.classList.toggle('active',b===button);if(b===button)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
-  $$('.view').forEach(v=>v.classList.toggle('hidden',v.id!==button.dataset.view));
-  $('#view-title').textContent={dashboard:'抢卡控制台',overview:'监控室',fleet:'我的实例',billing:'账单',profile:'账号与连接',notifications:'消息中心',settings:'通知设置',ai:'AI 环境与选卡'}[button.dataset.view];
-  window.dispatchEvent(new CustomEvent('appviewchange',{detail:{view:button.dataset.view}}));
+function closeAccountMenu(restoreFocus=false){
+  $('#account-menu').hidden=true;$('#account-entry').setAttribute('aria-expanded','false');
+  if(restoreFocus)$('#account-entry').focus({preventScroll:true});
+}
+function openAccountMenu(last=false){
+  $('#account-menu').hidden=false;$('#account-entry').setAttribute('aria-expanded','true');
+  const items=$$('[role="menuitem"]:not(:disabled)',$('#account-menu'));
+  (last?items.at(-1):items[0]).focus({preventScroll:true});
+}
+const viewNames={dashboard:'抢卡控制台',overview:'监控室',fleet:'我的实例',billing:'账单',profile:'账号设置',notifications:'消息中心',settings:'通知',updates:'软件更新',ai:'AI 环境与选卡'};
+const settingsViews=new Set(['profile','settings','billing','updates']);
+let lastWorkspaceView='overview';
+function navigateView(view,{focusContent=false,historyMode='push'}={}){
+  if(!Object.hasOwn(viewNames,view))return;
+  const inSettings=settingsViews.has(view);
+  if(!inSettings)lastWorkspaceView=view;
+  // 侧栏只呈现当前区域。快捷入口不参与 active 判断，避免看板把设置误认作工作页。
+  $('#workspace-navigation').hidden=inSettings;$('#settings-navigation').hidden=!inSettings;
+  document.body.classList.toggle('in-settings',inSettings);
+  $$('.nav-item[data-view]').forEach(b=>{const selected=b.dataset.view===view;b.classList.toggle('active',selected);if(selected)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
+  $('#account-entry').classList.toggle('account-section-active',inSettings);
+  closeAccountMenu();
+  $$('.view').forEach(v=>v.classList.toggle('hidden',v.id!==view));
+  $('#view-title').textContent=viewNames[view];$('#nav-context').textContent=inSettings?'设置中心':'工作台';
+  // 每页拥有独立地址；同时记录离开设置后应返回的工作页，刷新和历史导航也能保持层级。
+  if(historyMode!=='none'){
+    const method=historyMode==='replace'||location.hash==='#'+view?'replaceState':'pushState';
+    history[method]({workspaceView:lastWorkspaceView},'','#'+view);
+  }
+  window.dispatchEvent(new CustomEvent('appviewchange',{detail:{view}}));
   window.scrollTo({top:0,behavior:'instant'});
-}));
+  // 离开弹层或整层侧栏后将焦点交给标题，避免键盘焦点留在隐藏入口。
+  if(focusContent){const heading=$('#'+view+' h1');heading.tabIndex=-1;heading.focus({preventScroll:true});}
+}
+$$('.nav-item[data-view]').forEach(button=>button.addEventListener('click',()=>navigateView(button.dataset.view,{focusContent:true})));
+$$('[data-open-view]').forEach(button=>button.addEventListener('click',()=>navigateView(button.dataset.openView,{focusContent:true})));
+$('#back-to-workspace').addEventListener('click',()=>navigateView(lastWorkspaceView,{focusContent:true}));
+function restoreView(event){
+  const saved=history.state?.workspaceView;
+  if(Object.hasOwn(viewNames,saved)&&!settingsViews.has(saved))lastWorkspaceView=saved;
+  const view=location.hash.slice(1);
+  navigateView(Object.hasOwn(viewNames,view)?view:'overview',{historyMode:'replace',focusContent:event.type==='popstate'});
+}
+window.addEventListener('popstate',restoreView);
+// 等各页面模块挂好监听后再恢复深链接，目录跟踪可以收到正确的当前页。
+document.addEventListener('DOMContentLoaded',restoreView,{once:true});
+$('#account-entry').addEventListener('click',()=>$('#account-menu').hidden?openAccountMenu():closeAccountMenu());
+$('#account-entry').addEventListener('keydown',event=>{
+  if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();openAccountMenu(event.key==='ArrowUp');}
+});
+$('#account-menu').addEventListener('keydown',event=>{
+  if(event.key==='Escape'){event.preventDefault();closeAccountMenu(true);return;}
+  // Tab 离开菜单并回到自然阅读顺序，方向键用于菜单内部移动。
+  if(event.key==='Tab'){closeAccountMenu(true);return;}
+  if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
+  event.preventDefault();
+  const items=$$('[role="menuitem"]:not(:disabled)',$('#account-menu')), index=items.indexOf(document.activeElement);
+  const next=event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length;
+  items[next].focus();
+});
+document.addEventListener('pointerdown',event=>{
+  if(!$('#account-menu').hidden&&!$('.sidebar-bottom').contains(event.target))closeAccountMenu($('#account-menu').contains(document.activeElement));
+});
+document.addEventListener('focusin',event=>{if(!$('.sidebar-bottom').contains(event.target))closeAccountMenu();});
+$('#account-menu-logout').addEventListener('click',()=>{
+  // 沿用既有退出确认与暂停任务逻辑，菜单点击本身不直接退出账号。
+  closeAccountMenu(true);$('#logout-browser').click();
+});
 $$('[data-mode]').forEach(button=>button.addEventListener('click',()=>{
   if(currentMode==='create'&&button.dataset.mode!=='create')window.rememberAccountResource?.();
   currentMode=button.dataset.mode;$('#task-form').elements.paidConsent.checked=false;$$('[data-mode]').forEach(b=>{b.classList.toggle('active',b===button);b.setAttribute('aria-selected',b===button);});

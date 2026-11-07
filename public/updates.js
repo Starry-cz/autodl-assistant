@@ -35,7 +35,9 @@
     if($('#update-status').textContent!==statusText)$('#update-status').textContent=statusText;
     $('#update-checked-at').textContent=data.checkedAt?'上次成功检查 '+time(data.checkedAt,true):'';
     $('#account-update-badge').hidden=!available;
-    $('#account-entry').setAttribute('aria-label',available?'打开账号页面，有新版本 '+version(data.latestVersion):'打开账号页面');
+    $('#account-menu-update-badge').hidden=!available;
+    $('#settings-update-dot').hidden=!available;
+    $('#account-entry').setAttribute('aria-label',available?'打开账号菜单，有新版本 '+version(data.latestVersion):'打开账号菜单');
     const downloads=data.downloads||{};
     setDownload('update-main-download',desktop?downloads.desktopInstaller:downloads.source,available);
     $('#update-main-download').textContent=desktop?'下载桌面安装包':'下载新版源码';

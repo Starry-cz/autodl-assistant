@@ -1,3 +1,4 @@
+import { goView } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -211,7 +212,7 @@ try {
   assert.ok(modeTransitions.some(row => row.needsScroll && row.scrolledTop > 0), '必须覆盖长表单滚动后的切模式回顶');
 
   // 使用同一张原生表单保存两个通知渠道，核对旧接口的六个字段及布尔值未改变。
-  await page.locator('[data-view=settings]').click();
+  await goView(page, 'settings');
   const form = page.locator('#settings-form'), field = name => form.locator(`[name=${name}]`);
   assert.deepEqual(await form.locator('[name]').evaluateAll(elements => elements.map(element => element.name).sort()), fields);
   const settings = { webhookEnabled: true, webhookUrl: 'https://notify.example.test/synthetic', webhookToken: 'synthetic-webhook-token',
@@ -228,7 +229,7 @@ try {
   for (const [name, value] of Object.entries(settings)) assert.equal(app.store.data.settings[name], value, `通知字段 ${name}`);
 
   // 生成规则规划和内存模型报告，覆盖旧动态结果里的辅助文本，而不只检查静态设置页。
-  await page.locator('[data-view=ai]').click();
+  await goView(page, 'ai');
   await page.locator('#plan-form [name=projectText]').fill('合成示例\ntorch==2.1.0\nCUDA 12.1\nRequires 14GB of GPU memory.');
   await page.locator('#plan-submit').click();
   await page.locator('#plan-results').waitFor({ state: 'visible' });
@@ -250,7 +251,7 @@ try {
     await page.setViewportSize({ width, height });
     for (const view of views) {
       await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-      await page.locator(`[data-view=${view}]`).click();
+      await goView(page, view);
       await page.locator(`#${view}`).waitFor({ state: 'visible' });
       assert.equal(await page.evaluate(() => window.scrollY), 0, `${view} ${width}px 切页应回到顶部`);
       assert.deepEqual(await page.locator('.nav-item[aria-current=page]').evaluateAll(elements => elements.map(element => element.dataset.view)), [view]);

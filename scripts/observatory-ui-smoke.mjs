@@ -1,3 +1,4 @@
+import { goView } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -81,7 +82,7 @@ try {
     if (new URL(request.url()).pathname === '/api/tasks' && request.method() === 'POST') taskPosts.push(request.postDataJSON());
   });
   const view = async name => {
-    await page.locator(`.nav-item[data-view="${name}"]`).click();
+    await goView(page, name);
     await page.locator(`#${name}`).waitFor({ state: 'visible' });
     // 等待有限入场动画完成，避免把半透明过渡帧误当成最终界面。
     await page.locator(`#${name}`).evaluate(async element => {
