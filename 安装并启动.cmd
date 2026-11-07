@@ -6,7 +6,7 @@ rem 解压后的源码直接使用本地启动器；单独下载本文件时自�
 if exist "%~dp0scripts\start-local.ps1" goto local
 echo AutoDL 助手：正在准备安装，请保持联网并等待窗口提示。
 set "AUTODL_SETUP_SCRIPT=%TEMP%\autodl-setup-%RANDOM%-%RANDOM%.ps1"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; try { [Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/Starry-cz/autodl-assistant/v1.2.1/install.ps1' -OutFile $env:AUTODL_SETUP_SCRIPT } catch { Write-Host $_.Exception.Message; exit 1 }"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; try { [Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/Starry-cz/autodl-assistant/v1.3.0/install.ps1' -OutFile $env:AUTODL_SETUP_SCRIPT } catch { Write-Host $_.Exception.Message; exit 1 }"
 if errorlevel 1 goto failed
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%AUTODL_SETUP_SCRIPT%" %*
 set "AUTODL_SETUP_EXIT=%ERRORLEVEL%"

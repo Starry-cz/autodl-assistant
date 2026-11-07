@@ -1,6 +1,8 @@
 node_modules/
 .tools/
 .runtime/
+.versions/
+.autodl-current.json
 *.log
 .env
 .DS_Store

@@ -300,7 +300,7 @@ async function refresh(){
     renderTasks();renderNotifications();window.renderUpdates?.(appState.updates);if(detailId&&$('#task-dialog').open)renderDetail();
     if(!initialSettings){initialSettings=true;const form=$('#settings-form');for(const key of Object.keys(appState.settings)){if(form.elements[key]){if(form.elements[key].type==='checkbox')form.elements[key].checked=appState.settings[key];else form.elements[key].value=appState.settings[key];}}}
     window.dispatchEvent(new Event('appstatechange'));
-  }catch(e){$('#connection').textContent='已断开';$('#last-updated').textContent='服务未连接，监测可能已经停止';}finally{fetching=false;}
+  }catch(e){$('#connection').textContent='已断开';$('#last-updated').textContent='服务未连接，监测可能已经停止';void window.recoverUpdatedBackend?.(e).catch(()=>{});}finally{fetching=false;}
 }
 async function perform(command,id,data={}){
   if(command==='cancel'&&!confirm('停止后不再检查。云端已创建的实例和磁盘会保留，仍可能计费，需到 AutoDL 管理。继续停止本地任务？'))return;

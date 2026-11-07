@@ -116,16 +116,17 @@
   <p id="browser-busy" class="browser-busy hidden">后台正在操作页面；请稍后重试或先暂停任务。</p>
 </section>
   <section class="profile-local"><h2>本机运行状态</h2><p><span class="online-dot"></span>本地服务 <span id="connection">连接中</span></p><p class="hint">监测由本机服务持续运行。关闭网页不会停止任务，电脑休眠或服务退出后会停止监测。</p><p class="profile-version">本地改造版 · 普通容器实例</p></section>
-  <!-- 版本检查与账号登录互相独立；下载入口不会自动停止或替换正在运行的程序。 -->
+  <!-- 主按钮完成下载和后台交接；手动下载入口保留给离线安装或换电脑。 -->
   <section id="version-updates" class="profile-updates" aria-labelledby="updates-title">
     <div class="updates-heading"><div><h2 id="updates-title">版本与更新</h2><p>自动检查正式版本，也可随时手动检查。</p></div><button id="update-check" type="button" class="button">检查更新</button></div>
     <div class="updates-panel">
       <div class="updates-overview">
         <dl class="updates-versions"><div><dt>当前版本 <span id="update-channel"></span></dt><dd id="update-current-version">读取中…</dd></div><div><dt>最新正式版</dt><dd id="update-latest-version">尚未检查</dd></div></dl>
-        <div class="updates-downloads"><a id="update-main-download" class="button primary" target="_blank" rel="noopener noreferrer" hidden>下载新版</a><a id="update-portable-download" class="button" target="_blank" rel="noopener noreferrer" hidden>下载便携包</a><a id="update-release-link" class="updates-release-link" href="https://github.com/Starry-cz/autodl-assistant/releases/latest" target="_blank" rel="noopener noreferrer">查看发布页 ↗</a></div>
+        <div class="updates-downloads"><button id="update-install" class="button primary" type="button" hidden>更新并重启</button><a id="update-main-download" class="button" target="_blank" rel="noopener noreferrer" hidden>手动下载</a><a id="update-portable-download" class="button" target="_blank" rel="noopener noreferrer" hidden>下载便携包</a><a id="update-release-link" class="updates-release-link" href="https://github.com/Starry-cz/autodl-assistant/releases/latest" target="_blank" rel="noopener noreferrer">查看发布页 ↗</a></div>
       </div>
       <div class="updates-feedback"><p id="update-status" role="status" aria-live="polite">正在准备检查更新。</p><span id="update-checked-at"></span></div>
-      <div id="update-guidance" class="updates-guidance" hidden><strong>更新前，请先停止任务并完全退出助手。</strong><p id="update-instructions"></p></div>
+      <div id="update-installation" class="updates-guidance" role="status" aria-live="polite" hidden></div>
+      <div id="update-guidance" class="updates-guidance" hidden><strong>更新将短暂重启本机服务，保留登录资料和任务数据。</strong><p id="update-instructions"></p></div>
       <details id="update-notes" class="updates-notes" hidden><summary>查看更新说明</summary><p id="update-release-notes"></p></details>
     </div>
   </section>

@@ -210,13 +210,18 @@ export class AutoDLBrowserAdapter {
     this.setSession('unchecked');
     return page;
   }
+  async restoreSession() {
+    // 后台重启后主页面起始为 about:blank；先进入官网，后续身份读取才能使用同源会话。
+    // 这里只恢复保存的资料和核验状态，失效时不会打开交互登录窗口。
+    const page = await this.browser('background');
+    if (!page.url().startsWith(`${BASE}/`)) await page.goto(LIST, { waitUntil: 'domcontentloaded' });
+    return this.checkLogin();
+  }
   async login() {
     try {
       // 用户点连接时先尝试已保存的会话；有效就直接留在后台，不额外弹登录窗口。
       if (!this.context || this.browserMode === 'background') {
-        const savedPage = await this.browser('background');
-        if (!savedPage.url().startsWith(`${BASE}/`)) await savedPage.goto(LIST, { waitUntil: 'domcontentloaded' });
-        const checked = await this.checkLogin();
+        const checked = await this.restoreSession();
         if (checked.session.state === 'ready') return checked;
         await this.close();
       }

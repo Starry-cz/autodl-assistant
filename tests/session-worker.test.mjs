@@ -190,9 +190,15 @@ test('真实隔离持久 context 保存合成登录，移交与服务重启后�
   assert.deepEqual(launches, ['background', 'login', 'background']);
   await adapter.close();
   const restarted = createAdapter();
-  const restored = await restarted.login();
+  // 复现重启边界：独立核验页能确认登录，空白主页面却还不能读取账号身份。
+  await restarted.browser('background');
+  assert.equal(restarted.page.url(), 'about:blank');
+  assert.equal((await restarted.checkLogin()).session.state, 'ready');
+  await assert.rejects(restarted.readIdentity(), error => error.code === 'ACCOUNT_SESSION');
+  const restored = await restarted.restoreSession();
   assert.equal(restored.session.state, 'ready');
   assert.equal(restored.session.background, true);
+  assert.equal(restarted.page.url(), LIST);
   assert.equal((await restarted.readIdentity()).accountId, 'synthetic-worker-account');
   assert.deepEqual(launches, ['background', 'login', 'background', 'background']);
   await restarted.logout();

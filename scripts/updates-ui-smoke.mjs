@@ -124,6 +124,47 @@ try {
       assert.equal(await page.locator('#update-guidance').isVisible(), false);
       assert.equal(app.store.tasks().length, 0);
       pass(channel + '：已是最新版时收起下载提醒，无任务和账号副作用');
+      // 模拟安装交接的网络边界，不下载、不安装也不停止真实后台。
+      mode = 'new'; now += 61000;
+      await page.locator('#update-check').click();
+      await page.waitForFunction(() => !document.querySelector('#update-install').hidden);
+      let installCalls = 0;
+      let installation = {status:'idle'};
+      await page.route(base + '/api/updates/install', async route => {
+        installCalls++;
+        installation = {status:'preparing',phase:'download',targetVersion:'99.0.0',message:'正在下载新版，原数据保留'};
+        await route.fulfill({status:202,json:{installation}});
+      });
+      await page.route(base + '/api/state', async route => {
+        const response = await route.fetch(), state = await response.json();
+        state.updates.installation = installation;
+        await route.fulfill({response,json:state});
+      });
+      let switched = false;
+      await page.route(base + '/api/health', route => route.fulfill({json:{app:'autodl-assistant',
+        version:switched?'99.0.0':current,ready:true,codeChanged:false,installation}}));
+      await page.locator('#update-install').click();
+      await page.waitForFunction(() => document.querySelector('#update-install').disabled);
+      assert.equal(installCalls,1);
+      installation = {status:'error',targetVersion:'99.0.0',message:'合成下载失败，旧后台继续运行'};
+      await page.waitForFunction(() => /失败/.test(document.querySelector('#update-installation').textContent));
+      assert.equal(await page.locator('#update-install').isEnabled(),true);
+      await page.locator('#update-install').click();
+      // 时间推进只作用于测试页面，验证超时提示不会被普通状态刷新覆盖。
+      await page.waitForFunction(() => document.querySelector('#update-install').disabled);
+      await page.evaluate(() => { window.originalDateNow = Date.now; Date.now = () => window.originalDateNow() + 21 * 60 * 1000; });
+      await page.waitForFunction(() => /尚未确认新版启动/.test(document.querySelector('#update-installation').textContent));
+      await page.evaluate(() => { renderUpdates(appState.updates); Date.now = window.originalDateNow; });
+      assert.match(await page.locator('#update-installation').textContent(), /尚未确认新版启动/);
+      installation = {status:'error',targetVersion:'99.0.0',message:'合成交接失败'};
+      await page.waitForFunction(() => !document.querySelector('#update-install').disabled);
+      await page.locator('#update-install').click();
+      const reload = page.waitForEvent('framenavigated', {predicate: frame => frame === page.mainFrame()});
+      switched = true;
+      await reload;
+      assert.equal(installCalls,3);
+      assert.equal(app.store.tasks().length,0);
+      pass(channel + '：更新按钮防重复、失败可重试、超时提示保留、新后台就绪后重载');
     } finally {
       unblock();
       await context.close();

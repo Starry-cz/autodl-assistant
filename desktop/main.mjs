@@ -3,8 +3,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, Menu, Tray, dialog, nativeImage, shell } from 'electron';
 import { redact, messageOf } from '../src/errors.mjs';
+import { compareVersions } from '../src/updates.mjs';
 import { allowsNotification, createExitController, desktopPaths, navigationKind } from './lifecycle.mjs';
 import { listenDesktop } from './listen.mjs';
+import { activeDesktopTarget, desktopUpgradeResult, launchDesktop, prepareDesktopUpdate, startDesktopHandoff } from './upgrade.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const paths = desktopPaths({
@@ -97,7 +99,20 @@ async function startDesktop() {
   }
   const { createApplication } = await import('../src/server.mjs');
   // 桌面窗口共用网页界面，但更新入口应推荐带运行环境的桌面安装包。
-  backend = createApplication({ runtimeDir: paths.runtime, updatesOptions: { channel: 'desktop' }, onStop: () => { void exitController.request(); } });
+  backend = createApplication({ runtimeDir: paths.runtime, restoreSession: true, updatesOptions: { channel: 'desktop' },
+    onStop: () => { void exitController.request(); },
+    onInstallUpdate: async ({ release, report, assertReady, quiesce }) => {
+      if (!app.isPackaged) throw new Error('桌面开发模式请更新源码后重新启动；自动安装用于正式桌面包');
+      const prepared = await prepareDesktopUpdate({ release, userData: paths.userData, runtimeDir: paths.runtime, report });
+      await quiesce();
+      assertReady();
+      report({ status: 'switching', phase: 'restart', message: '正在保存本地状态并切换新版桌面程序…', targetVersion: release.latestVersion });
+      await startDesktopHandoff({ prepared, userData: paths.userData, runtimeDir: paths.runtime, executable: process.execPath });
+      // 用户已经在页面选择安装更新；后台检查过提交状态，再按同一正常退出流程收尾。
+      if (!await exitController.request({ prompt: false })) throw new Error('旧桌面程序未能正常停止，更新尚未切换');
+    },
+  });
+  await backend.ready;
   await listenDesktop(backend.server, {
     portFile: path.join(paths.userData, 'local-port.json'),
     onPortChanged: ({ previous, port }) => writeLog('warn', `桌面端口 ${previous} 已被占用，已重新分配为 ${port}`),
@@ -142,6 +157,11 @@ async function startDesktop() {
   tray.on('double-click', showWindow);
   await mainWindow.loadURL(localOrigin);
   showWindow();
+  const upgradeResult = desktopUpgradeResult(paths.userData);
+  if (upgradeResult?.status === 'error' && compareVersions(upgradeResult.version, app.getVersion()) === 1) {
+    void dialog.showMessageBox(mainWindow, { type: 'warning', title: '更新未完成', message: upgradeResult.message,
+      detail: '旧版本及本地登录、任务文件仍保留。检查网络和磁盘后，可以在版本与更新中重试。' });
+  }
   writeLog('info', `桌面版已启动，版本 ${app.getVersion()}，本地端口 ${backend.server.address().port}`);
 }
 
@@ -152,7 +172,12 @@ try {
   app.setPath('userData', paths.userData);
   app.setPath('sessionData', path.join(paths.userData, 'session'));
   app.setAppUserModelId('com.starrycz.autodlassistant');
-  if (!app.requestSingleInstanceLock()) {
+  const updatedExecutable = app.isPackaged ? activeDesktopTarget({ userData: paths.userData, currentVersion: app.getVersion(), executable: process.execPath }) : null;
+  if (updatedExecutable) {
+    // 安装目录或便携目录的旧快捷方式继续可用；同一用户始终进入已激活的新版本。
+    await launchDesktop(updatedExecutable, paths.userData);
+    app.quit();
+  } else if (!app.requestSingleInstanceLock()) {
     app.quit();
   } else {
     // 将现有后端的日志一并留在桌面数据目录；不把登录信息回显到控制台。

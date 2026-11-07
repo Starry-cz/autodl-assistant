@@ -7,7 +7,10 @@ import { ROOT, inspectRunningBackend, stopRunningBackend, lockReleased } from '.
 async function main() {
   const port = Number(process.env.PORT || 8787), base = 'http://127.0.0.1:' + port;
   // 与启动入口一致：相对运行目录以项目根目录解析，不受调用命令时所在目录影响。
-  const runtimeDir = path.resolve(ROOT, process.env.AUTODL_RUNTIME_DIR || '.runtime');
+  const pointerPath = path.join(ROOT, '.autodl-current.json');
+  const pointer = fs.existsSync(pointerPath) ? JSON.parse(fs.readFileSync(pointerPath, 'utf8')) : null;
+  const activeRoot = pointer?.projectRoot ? path.resolve(pointer.projectRoot) : ROOT;
+  const runtimeDir = path.resolve(ROOT, process.env.AUTODL_RUNTIME_DIR || pointer?.runtimeDir || '.runtime');
   const lock = path.join(runtimeDir, 'server.lock');
   const alive = async () => { try { return (await fetch(base + '/api/health', { signal: AbortSignal.timeout(3000) })).ok; } catch { return false; } };
   let response;
@@ -21,7 +24,7 @@ async function main() {
   };
   // 同版本也可能来自另一份解压目录；确认项目和运行目录归属之前不读取页面令牌或账号状态。
   if (!response.ok || health?.ok !== true || health.app !== 'autodl-assistant'
-    || !samePath(health.projectRoot, ROOT) || !samePath(health.runtimeDir, runtimeDir)) {
+    || !samePath(health.projectRoot, activeRoot) || !samePath(health.runtimeDir, runtimeDir)) {
     console.error('端口 ' + port + ' 由其他项目目录、其他运行目录或无法确认归属的服务占用，未读取账号状态，也未停止后台。请在该后台所属的项目目录执行停止命令。');
     return 1;
   }

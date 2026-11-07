@@ -6,11 +6,12 @@
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$releaseVersion = '1.2.1'
+$releaseVersion = '1.3.0'
 $downloadUrl = "https://github.com/Starry-cz/autodl-assistant/releases/download/v$releaseVersion/autodl-assistant-v$releaseVersion.zip"
 $temporaryDirectory = $null
 $temporaryParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
 $installationCopied = $false
+$existingProject = $false
 
 function Start-InstalledProject([string]$Directory) {
     # 安装与下载源码后双击使用同一入口，缺少 Node.js 时由启动器自动准备。
@@ -53,13 +54,19 @@ try {
             $launcherPath = Join-Path $installationPath 'scripts/start-local.ps1'
             if ((Test-Path -LiteralPath $packagePath -PathType Leaf) -and (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
                 $installed = Get-Content -LiteralPath $packagePath -Raw -Encoding UTF8 | ConvertFrom-Json
-                if ($installed.name -eq 'autodl-gpu-watch' -and $installed.version -eq $releaseVersion) {
+                $pointerPath = Join-Path $installationPath '.autodl-current.json'
+                if (Test-Path -LiteralPath $pointerPath) {
+                    $pointer = Get-Content -LiteralPath $pointerPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                    $installed = Get-Content -LiteralPath (Join-Path $pointer.projectRoot 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+                }
+                if ($installed.name -eq 'autodl-gpu-watch' -and [version]$installed.version -ge [version]$releaseVersion) {
                     Write-Host '已找到当前版本，直接启动，不覆盖本地数据。'
                     Start-InstalledProject $installationPath
                     exit 0
                 }
+                if ($installed.name -eq 'autodl-gpu-watch') { $existingProject = $true }
             }
-            throw "安装目录不为空，未覆盖任何文件：$installationPath。已有项目请直接双击其中的启动抢卡助手.cmd；新安装可用 -InstallDir 指定空目录。"
+            if (-not $existingProject) { throw "安装目录不为空且不是已安装的 AutoDL 助手：$installationPath。请指定空目录。" }
         }
     }
 
@@ -77,11 +84,17 @@ try {
     }
 
     New-Item -ItemType Directory -Path $installationPath -Force | Out-Null
-    Get-ChildItem -LiteralPath $sourcePath -Force | Copy-Item -Destination $installationPath -Recurse
+    $targetPath = if ($existingProject) { Join-Path $installationPath ('.versions\' + $releaseVersion + '-' + [Guid]::NewGuid().ToString('N')) } else { $installationPath }
+    New-Item -ItemType Directory -Path $targetPath -Force | Out-Null
+    Get-ChildItem -LiteralPath $sourcePath -Force | Copy-Item -Destination $targetPath -Recurse
     $installationCopied = $true
-    Write-Host "源码已安装到：$installationPath"
+    Write-Host "源码已准备到：$targetPath"
 
-    Start-InstalledProject $installationPath
+    if ($existingProject) {
+        $env:AUTODL_INSTALL_ROOT = $installationPath
+        $env:AUTODL_RUNTIME_DIR = if ($pointer -and $pointer.runtimeDir) { $pointer.runtimeDir } else { Join-Path $installationPath '.runtime' }
+    }
+    Start-InstalledProject $targetPath
 } catch {
     Write-Host $_.Exception.Message -ForegroundColor Red
     if (-not $installationCopied -and $temporaryDirectory) {

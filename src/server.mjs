@@ -24,6 +24,7 @@ import { assertLocalRequest } from './local-access.mjs';
 import { AutoDLBrowserAdapter } from './adapters/autodl.mjs';
 import { AiAssistant, AI_PROVIDERS } from './ai.mjs';
 import { ReleaseUpdates } from './updates.mjs';
+import { prepareWebUpgrade, assertUpgradeTasksReady } from './upgrade.mjs';
 import { normalizePlanInput, extractConstraints, mergeConstraints, buildPlan, normalizeImageHint, pickImageOption } from './env-plan.mjs';
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // 发布版本统一来自包信息，避免健康检查与下载版本不一致。
@@ -38,7 +39,7 @@ export async function inspectRunningBackend(port, { fetchImpl = fetch } = {}) {
     const state = await (await fetchImpl(base + '/api/state', { headers: { 'X-Local-Token': token }, signal: AbortSignal.timeout(3000) })).json();
     const active = (state.tasks || []).filter(t => ['queued','watching','preparing','submitting','verifying','reconciling'].includes(t.state)).length;
     if (!state.server) return { kind: 'legacy', active };
-    const stop = () => fetchImpl(base + '/api/server/stop', { method: 'POST', headers: { 'X-Local-Token': token, 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: true }), signal: AbortSignal.timeout(15000) });
+    const stop = (options = {}) => fetchImpl(base + '/api/server/stop', { method: 'POST', headers: { 'X-Local-Token': token, 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: true, ...options }), signal: AbortSignal.timeout(15000) });
     return { kind: state.server.codeChanged ? 'outdated' : 'current', active, canStop: state.server.canStop === true, stop };
   } catch { return { kind: 'unreachable' }; }
 }
@@ -104,7 +105,7 @@ export function codeFingerprint(root = ROOT) {
 }
 export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR || path.join(ROOT,'.runtime'),
   adapters: suppliedAdapters, startEngine = true, lock = true, aiOptions = {}, walletOptions = {}, secretProtector,
-  onStop = null, fingerprint = codeFingerprint, imageBusyWaitMs = 20000, updatesOptions = {} } = {}) {
+  onStop = null, onInstallUpdate = null, restoreSession = false, fingerprint = codeFingerprint, imageBusyWaitMs = 20000, updatesOptions = {} } = {}) {
   // 相对运行目录统一从项目根目录解析，不依赖启动终端所在位置。
   runtimeDir = path.resolve(ROOT, runtimeDir);
   fs.mkdirSync(runtimeDir, {recursive:true,mode:0o700});
@@ -255,6 +256,32 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
   const ai = new AiAssistant(store, aiOptions);
   // 检查器不主动联网；启动页请求与手动检查共用缓存，当前版本始终来自本项目包信息。
   const updates = new ReleaseUpdates({ ...updatesOptions, currentVersion: APP_VERSION });
+  let installation = { status: 'idle', phase: '', message: '', targetVersion: null, error: null }, installing = false, ready = false;
+  const installationState = () => {
+    // 新进程启动后显示独立交接进程写下的结果，尤其是回退旧版本后的错误。
+    if (!installing && installation.status === 'idle') {
+      try { const saved = JSON.parse(fs.readFileSync(path.join(runtimeDir, 'upgrade-status.json'), 'utf8')); if (saved.status === 'error' || saved.status === 'complete') return saved; } catch {}
+    }
+    return { ...installation };
+  };
+  const updatesState = () => ({ ...updates.publicState(), installation: installationState() });
+  function beginInstall(release) {
+    if (installing) return;
+    if (!onInstallUpdate && typeof onStop !== 'function') fail('UPDATE_UNSUPPORTED', '当前启动方式无法自动重启，请使用正式启动入口', { status: 409 });
+    if (!release.updateAvailable) fail('UPDATE_RELEASE', '请先检查到可用的正式新版', { status: 409 });
+    assertUpgradeTasksReady(store.tasks(), engine.busy);
+    installing = true;
+    installation = { status: 'preparing', phase: 'download', message: '正在准备新版，原有监测继续运行。', targetVersion: release.latestVersion, error: null };
+    const report = change => { installation = { ...installation, ...change }; };
+    const assertReady = () => assertUpgradeTasksReady(store.tasks(), engine.busy);
+    const quiesce = async () => { await engine.stop(); assertReady(); };
+    // 请求先返回进度，下载和依赖准备不占用网页请求；交接失败继续沿用原后台。
+    Promise.resolve().then(() => (onInstallUpdate || prepareWebUpgrade)({ release, runtimeDir, projectRoot: ROOT,
+      installationRoot: process.env.AUTODL_INSTALL_ROOT || ROOT, port: server.address().port, report, assertReady, quiesce, onStop })).catch(error => {
+      installing = false; report({ status: 'error', error: redact(messageOf(error)), message: redact(messageOf(error)) });
+      if (!closing && startEngine) { engine.stopping = false; engine.start(); }
+    });
+  }
   const token = randomBytes(32).toString('hex');
   const startedAt = Date.now(), startCode = fingerprint();
   let codeCheck = { at: 0, changed: false };
@@ -276,6 +303,9 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
     if(!data || typeof data!=='object' || Array.isArray(data)) fail('JSON','请求正文必须是 JSON 对象');
     return data;
   }
+  // 一个后台生命周期只服务启动时的静态文件，避免磁盘覆盖后出现新页面配旧路由。
+  const assets = {'/':'index.html','/index.html':'index.html','/app.js':'app.js','/task-monitor.js':'task-monitor.js','/account.js':'account.js','/updates.js':'updates.js','/images.js':'images.js','/ai.js':'ai.js','/plan.js':'plan.js','/observatory.js':'observatory.js','/market.js':'market.js','/profile.js':'profile.js','/style.css':'style.css','/favicon.svg':'favicon.svg'};
+  const staticContent = new Map([...new Set(Object.values(assets))].map(asset => [asset,fs.readFileSync(path.join(ROOT,'public',asset),'utf8')]));
   const server = http.createServer(async(req,res)=>{
     if(closing) res.setHeader('Connection','close');
     res.setHeader('X-Content-Type-Options','nosniff'); res.setHeader('Referrer-Policy','no-referrer');
@@ -288,7 +318,7 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
       const host = assertLocalRequest(req);
       const url = new URL(req.url,`http://${host}`);
       // 启停入口用安装目录确认后台归属，避免同版本的不同副本误开、误停。
-      if (url.pathname === '/api/health' && req.method === 'GET') return json(res,200,{ok:true,app:'autodl-assistant',version:APP_VERSION,pid:process.pid,projectRoot:ROOT,runtimeDir,codeChanged:serverState().codeChanged});
+      if (url.pathname === '/api/health' && req.method === 'GET') return json(res,200,{ok:true,app:'autodl-assistant',version:APP_VERSION,pid:process.pid,projectRoot:ROOT,runtimeDir,installationRoot:process.env.AUTODL_INSTALL_ROOT||ROOT,codeChanged:serverState().codeChanged,startedAt,ready,installation:installationState()});
       if(url.pathname.startsWith('/api/')) {
         if(req.headers['x-local-token'] !== token) fail('TOKEN','本地访问令牌无效，请重新加载页面',{status:403});
         if(req.method === 'GET' && url.pathname === '/api/state') return json(res,200,{...scopedStoreState(),
@@ -300,7 +330,7 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
           observatory:adapters.autodl.sessionStatus?.()?.state === 'ready' && (!accountEnabled||visibleIdentity()) ? observatory.publicState() : null,
           market:adapters.autodl.sessionStatus?.()?.state === 'ready' && (!accountEnabled||visibleIdentity()) ? market.publicState(visibleCatalog()) : null,
           wallet:accountEnabled&&!visibleIdentity()?{configured:false,snapshot:null}:wallet.publicState(),credentialStorage:store.secretStorage.publicState(),regions:REGIONS,
-          gpuCatalog:normalizeGpuCatalog(visibleCatalog()),ai:ai.publicState(),aiProviders:AI_PROVIDERS,updates:updates.publicState(),server:serverState(),now:Date.now()});
+          gpuCatalog:normalizeGpuCatalog(visibleCatalog()),ai:ai.publicState(),aiProviders:AI_PROVIDERS,updates:updatesState(),server:serverState(),now:Date.now()});
         const taskLogs = url.pathname.match(/^\/api\/tasks\/([^/]+)\/logs$/);
         if(req.method === 'GET' && taskLogs) {
           requireSession();
@@ -314,9 +344,16 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
         if(req.method !== 'POST') fail('METHOD','不支持的请求方法',{status:405});
         if(!(req.headers['content-type'] || '').startsWith('application/json')) fail('CONTENT_TYPE','控制请求需使用 JSON',{status:415});
         const data = await body(req);
+        if (!ready && !['/api/updates/check','/api/server/stop'].includes(url.pathname)) fail('BUSY','正在恢复已保存的账号连接，请稍候。',{status:409});
+        if (installing && !['/api/updates/check','/api/updates/install','/api/server/stop'].includes(url.pathname) && !/^\/api\/tasks\/[\w-]+\/(pause|cancel)$/.test(url.pathname))
+          fail('UPDATING', '正在准备更新，请等待完成后再修改配置或连接账号；原任务可暂停或停止。', { status: 409 });
+        if (url.pathname === '/api/updates/install') {
+          beginInstall(updates.publicState());
+          return json(res,202,{installation:installationState()});
+        }
         if(url.pathname === '/api/updates/check') {
           if(data.force !== undefined && typeof data.force !== 'boolean') fail('UPDATES','是否立即检查更新必须为布尔值');
-          return json(res,200,{updates:await updates.check({force:data.force===true})});
+          await updates.check({force:data.force===true});return json(res,200,{updates:updatesState()});
         }
         // 看板只读同步与抢卡共用页面操作锁；账户信息只在当前本地服务内缓存。
         if(url.pathname === '/api/observatory/overview') {
@@ -334,6 +371,10 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
         if(url.pathname === '/api/server/stop') {
           if(data.confirm !== true) fail('CONFIRM','请明确确认停止本地后台',{status:400});
           if(typeof onStop !== 'function') fail('UNSUPPORTED','当前运行方式不支持从页面停止后台',{status:409});
+          if (data.forUpdate === true) {
+            // 检查与冻结之间没有异步间隙，避免检查后恰好开始新的付费提交。
+            assertUpgradeTasksReady(store.tasks(), engine.busy); void engine.stop();
+          }
           // 回复发完、连接关闭后再停止：停止时会断开空闲连接，过早停止可能让调用方收不到这条回复。
           res.once('close',()=>setImmediate(onStop));res.setHeader('Connection','close');
           json(res,202,{ok:true,message:'后台正在停止：等待当前页面操作结束后关闭专用浏览器；云端实例不受影响'});
@@ -526,11 +567,10 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
         fail('NOT_FOUND','接口不存在',{status:404});
       }
       if(req.method!=='GET') fail('METHOD','不支持的请求方法',{status:405});
-      const assets = {'/':'index.html','/index.html':'index.html','/app.js':'app.js','/task-monitor.js':'task-monitor.js','/account.js':'account.js','/updates.js':'updates.js','/images.js':'images.js','/ai.js':'ai.js','/plan.js':'plan.js','/observatory.js':'observatory.js','/market.js':'market.js','/profile.js':'profile.js','/style.css':'style.css','/favicon.svg':'favicon.svg'};
       const asset=assets[url.pathname];
       if(!asset) fail('NOT_FOUND','页面不存在',{status:404});
       const contentType=asset.endsWith('.css')?'text/css':asset.endsWith('.js')?'text/javascript':asset.endsWith('.svg')?'image/svg+xml':'text/html';
-      let content=fs.readFileSync(path.join(ROOT,'public',asset),'utf8');
+      let content=staticContent.get(asset);
       if(asset==='index.html') content=content.replace('__LOCAL_TOKEN__',token);
       res.writeHead(200,{'Content-Type':`${contentType}; charset=utf-8`,'Cache-Control':'no-store'});res.end(content);
     } catch(error) {
@@ -540,13 +580,29 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
       json(res,error.status || 500,{error:error.code || 'INTERNAL',message:redact(messageOf(error)),...(conflict ? { conflict } : {})});
     }
   });
-  if(startEngine) engine.start();
+  // 先恢复旧会话并核对账号，再启动引擎；避免任务因重启瞬间未登录而误暂停。
   let closing;
-  return {server,store,engine,adapters,ai,wallet,observatory,market,updates,token,close(){
+  const readyPromise = (async () => {
+    if (restoreSession && accountEnabled && store.data.accountOwnerId) {
+      try {
+        const checked = await adapters.autodl.restoreSession();
+        if (checked.session?.state !== 'ready') throw new Error('已保存的登录已失效，请在账号页重新连接后恢复任务。');
+        const actual = await adapters.autodl.readIdentity();
+        if (actual.ownerId !== store.data.accountOwnerId) throw new Error('已保存会话的账号与原任务不一致，请重新连接原账号。');
+        await connectIdentity();
+      } catch (error) {
+        accountError = redact(messageOf(error)); pauseAccountTasks();
+      }
+    }
+    ready = true;
+    if (startEngine && !closing) engine.start();
+  })();
+  return {server,store,engine,adapters,ai,wallet,observatory,market,updates,token,ready:readyPromise,close(){
     if (!closing) closing = (async () => {
       ai.close(); wallet.close(); updates.close();
       const closed = new Promise(resolve => server.close(resolve));
       try {
+        await readyPromise;
         await engine.stop(); await notifier.stop();
         await Promise.allSettled(Object.values(adapters).map(a=>a.close?.()));
         await closed;
@@ -561,7 +617,7 @@ if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.
   const lockPath=path.join(path.resolve(ROOT,process.env.AUTODL_RUNTIME_DIR || '.runtime'),'server.lock');
   const shutdown=async()=>{if(closing)return;closing=true;await app.close();process.exit(0);};
   const start=()=>{
-    app=createApplication({onStop:()=>void shutdown()});
+    app=createApplication({onStop:()=>void shutdown(),restoreSession:true});
     app.server.listen(port,'127.0.0.1',()=>console.log(`AutoDL GPU 监测台已启动：http://127.0.0.1:${port}\n仅连接真实 AutoDL，默认仅监测；关闭此进程或电脑休眠将停止检查，关闭网页不会停止。\n正常停止：在此窗口按 Ctrl+C，或在项目目录运行 npm.cmd run stop。`));
     app.server.on('error',async error=>{console.error(redact(messageOf(error)));await app.close();process.exitCode=1;});
   };

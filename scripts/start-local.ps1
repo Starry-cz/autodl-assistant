@@ -16,26 +16,81 @@ function Assert-OwnBackend($health) {
     }
 }
 
+function Save-CurrentInstallation {
+    # 旧快捷方式继续转发到新目录；只记录路径，不复制或搬动登录、任务文件。
+    $record = @{ projectRoot = $projectRoot; runtimeDir = $runtimePath; version = $projectVersion; installationRoot = $installationRoot } | ConvertTo-Json
+    [IO.File]::WriteAllText((Join-Path $installationRoot '.autodl-current.json'), $record)
+    if ($projectRoot -ine $installationRoot) {
+        [IO.File]::WriteAllText((Join-Path $projectRoot '.autodl-current.json'), $record)
+        # 首次升级的旧入口尚不认识指针；仅更新已确认属于本安装的启停脚本。
+        Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts/start-local.ps1') -Destination (Join-Path $installationRoot 'scripts/start-local.ps1') -Force
+        Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts/stop-server.mjs') -Destination (Join-Path $installationRoot 'scripts/stop-server.mjs') -Force
+    }
+    if ($listenPort -eq 8787) {
+        $registryDirectory = Join-Path $env:LOCALAPPDATA 'AutoDL-Assistant'
+        New-Item -ItemType Directory -Path $registryDirectory -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $registryDirectory 'web-install.json'), $record)
+    }
+}
+
 try {
+    $explicitRuntime = [bool]$env:AUTODL_RUNTIME_DIR
     $projectVersion = (Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Encoding UTF8 -Raw | ConvertFrom-Json).version
     $listenPort = if ($env:PORT) { [int]$env:PORT } else { 8787 }
     if ($listenPort -lt 1 -or $listenPort -gt 65535) { throw 'PORT 必须为 1 至 65535 的整数。' }
     $localUrl = "http://127.0.0.1:$listenPort"
+    $installationRoot = if ($env:AUTODL_INSTALL_ROOT) { [IO.Path]::GetFullPath($env:AUTODL_INSTALL_ROOT) } else { $projectRoot }
+    $pointerPath = Join-Path $projectRoot '.autodl-current.json'
+    $saved = $null
+    if (Test-Path -LiteralPath $pointerPath) { $saved = Get-Content -LiteralPath $pointerPath -Raw -Encoding UTF8 | ConvertFrom-Json }
+    elseif (-not $env:AUTODL_RUNTIME_DIR -and $listenPort -eq 8787) {
+        $registryPath = Join-Path $env:LOCALAPPDATA 'AutoDL-Assistant/web-install.json'
+        if (Test-Path -LiteralPath $registryPath) { $saved = Get-Content -LiteralPath $registryPath -Raw -Encoding UTF8 | ConvertFrom-Json }
+    }
+    if ($saved) {
+        $savedPackage = Join-Path $saved.projectRoot 'package.json'
+        if (-not (Test-Path -LiteralPath $savedPackage)) { throw '上次更新后的程序目录不存在，请保留原数据并重新安装。' }
+        $savedMetadata = Get-Content -LiteralPath $savedPackage -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($savedMetadata.name -ne 'autodl-gpu-watch') { throw '已记录的安装目录不是 AutoDL 助手。' }
+        if (-not $env:AUTODL_RUNTIME_DIR) { $env:AUTODL_RUNTIME_DIR = $saved.runtimeDir }
+        $installationRoot = if ($saved.installationRoot) { $saved.installationRoot } else { $installationRoot }
+        if ([version]$savedMetadata.version -ge [version]$projectVersion -and $saved.projectRoot -ine $projectRoot) {
+            $env:AUTODL_INSTALL_ROOT = $installationRoot
+            $forward = @('-NoPause'); if ($NoOpen) { $forward += '-NoOpen' }
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $saved.projectRoot 'scripts/start-local.ps1') @forward
+            exit $LASTEXITCODE
+        }
+    }
     # 与 Node 后台一致：绝对路径直接使用，相对路径从项目根目录解析。
     $runtimePath = if (-not $env:AUTODL_RUNTIME_DIR) { Join-Path $projectRoot '.runtime' }
         elseif ([IO.Path]::IsPathRooted($env:AUTODL_RUNTIME_DIR)) { [IO.Path]::GetFullPath($env:AUTODL_RUNTIME_DIR) }
         else { [IO.Path]::GetFullPath((Join-Path $projectRoot $env:AUTODL_RUNTIME_DIR)) }
     $env:AUTODL_RUNTIME_DIR = $runtimePath
+    $env:AUTODL_INSTALL_ROOT = $installationRoot
     $health = Get-LocalHealth
+    $replaceBackend = $false
     if ($health) {
-        Assert-OwnBackend $health
-        Write-Host "后台已运行：$localUrl"
-        if (-not $NoOpen) { Start-Process $localUrl }
-        exit 0
+        if ($health.app -ne 'autodl-assistant') { throw "端口 $listenPort 被其他程序占用。" }
+        if ($health.projectRoot -ieq $projectRoot -and $health.version -eq $projectVersion -and -not $health.codeChanged) {
+            Assert-OwnBackend $health; Save-CurrentInstallation
+            Write-Host "后台已运行：$localUrl"
+            if (-not $NoOpen) { Start-Process $localUrl }; exit 0
+        }
+        if ([version]$health.version -gt [version]$projectVersion) { throw '已有更高版本正在运行，不自动降级；请打开现有网页。' }
+        # 默认端口的新源码可承接正在运行的旧安装，原资料目录原地复用。
+        if ($health.projectRoot -ine $projectRoot -and $runtimePath -ine $health.runtimeDir) {
+            if ($saved -or $explicitRuntime -or $listenPort -ne 8787) { throw '当前端口属于另一份安装，未切换其后台。' }
+            $runtimePath = [IO.Path]::GetFullPath($health.runtimeDir)
+            $env:AUTODL_RUNTIME_DIR = $runtimePath
+            $installationRoot = if ($health.installationRoot) { $health.installationRoot } else { $health.projectRoot }
+            $env:AUTODL_INSTALL_ROOT = $installationRoot
+        }
+        if ($runtimePath -ine $health.runtimeDir) { throw '运行中的后台使用另一数据目录，未停止。' }
+        $replaceBackend = $true
     }
     $client = New-Object Net.Sockets.TcpClient
     try { $client.Connect('127.0.0.1', $listenPort); $occupied = $true } catch { $occupied = $false } finally { $client.Dispose() }
-    if ($occupied) { throw "端口 $listenPort 已被占用，请停止原后台或设置其他 PORT。" }
+    if ($occupied -and -not $replaceBackend) { throw "端口 $listenPort 已被占用，请停止原后台或设置其他 PORT。" }
 
     Write-Host '[1/4] 准备运行环境（首次可能需要下载 Node.js）'
     . (Join-Path $PSScriptRoot 'node-runtime.ps1')
@@ -58,6 +113,12 @@ try {
     }
     if ($LASTEXITCODE -ne 0) { throw '浏览器预检未通过，请根据上方提示处理后重试。' }
 
+    if ($replaceBackend) {
+        Write-Host '新版环境已准备好，正在正常交接旧后台……'
+        & $nodeRuntime.Node (Join-Path $PSScriptRoot 'restart-for-upgrade.mjs')
+        if ($LASTEXITCODE -ne 0) { throw '旧后台未完成安全交接，未启动第二个后台。请按上方提示处理后重试。' }
+    }
+
     New-Item -ItemType Directory -Path $runtimePath -Force | Out-Null
     Write-Host '[4/4] 启动本地网页'
     # 后台隐藏运行，日志写入本安装的运行目录；只在确认服务就绪后打开网页。
@@ -65,12 +126,13 @@ try {
     $backendPid = & $nodeRuntime.Node (Join-Path $PSScriptRoot 'start-background.mjs')
     if ($LASTEXITCODE -ne 0) { throw '后台进程创建失败，请根据上方错误处理后重试。' }
     $serverProcess = Get-Process -Id ([int]$backendPid) -ErrorAction Stop
-    for ($attempt = 0; $attempt -lt 50; $attempt++) {
+    for ($attempt = 0; $attempt -lt 300; $attempt++) {
         $serverProcess.Refresh()
         if ($serverProcess.HasExited) { throw "后台启动失败，请查看 $runtimePath\server-error.log。" }
         $health = Get-LocalHealth
-        if ($health) {
+        if ($health -and $health.ready -ne $false) {
             Assert-OwnBackend $health
+            Save-CurrentInstallation
             Write-Host "启动成功：$localUrl"
             Write-Host '关闭网页后后台仍运行；停止时请双击本目录的“停止抢卡助手.cmd”。'
             if (-not $NoOpen) { Start-Process $localUrl }
