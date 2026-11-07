@@ -27,7 +27,8 @@ export async function prepareWebUpgrade({ release, runtimeDir, projectRoot, inst
   if (!response.ok || !response.body) throw new AppError('UPDATE_DOWNLOAD', '新版下载失败，HTTP ' + response.status);
   await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(archive));
   const quote = value => "'" + value.replaceAll("'", "''") + "'";
-  await runUpgradeCommand('powershell.exe', ['-NoProfile', '-Command', `$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath ${quote(archive)} -DestinationPath ${quote(unpacked)}`]);
+  // 仅调整解压子进程的策略，使默认 Restricted 环境也能加载 Archive 模块。
+  await runUpgradeCommand('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath ${quote(archive)} -DestinationPath ${quote(unpacked)}`]);
   const targetRoot = path.join(unpacked, 'autodl-assistant-v' + targetVersion);
   const metadata = JSON.parse(fs.readFileSync(path.join(targetRoot, 'package.json'), 'utf8'));
   if (metadata.name !== 'autodl-gpu-watch' || metadata.version !== targetVersion) throw new AppError('UPDATE_PACKAGE', '下载包的项目或版本不匹配，未切换后台');

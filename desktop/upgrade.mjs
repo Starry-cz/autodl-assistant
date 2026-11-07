@@ -46,7 +46,8 @@ export async function prepareDesktopUpdate({ release, userData, runtimeDir = pat
     callback(null, chunk);
   } }), fs.createWriteStream(archive, { flags: 'wx' }));
   report({ status: 'preparing', phase: 'prepare', message: '正在解压并检查新版运行环境…', targetVersion: version });
-  await run('powershell.exe', ['-NoProfile', '-Command', "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath $env:AUTODL_UPDATE_ARCHIVE -DestinationPath $env:AUTODL_UPDATE_TARGET"], {
+  // 仅对解压子进程放开脚本策略，使 Windows 默认 Restricted 下也能加载内置 Archive 模块。
+  await run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath $env:AUTODL_UPDATE_ARCHIVE -DestinationPath $env:AUTODL_UPDATE_TARGET"], {
     windowsHide: true, env: { ...process.env, AUTODL_UPDATE_ARCHIVE: archive, AUTODL_UPDATE_TARGET: target }, timeout: 300000,
   });
   const appRoot = path.join(target, 'resources', 'app'), executable = path.join(target, 'AutoDL Assistant.exe');

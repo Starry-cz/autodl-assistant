@@ -42,6 +42,7 @@ test('桌面更新先下载及预检，路径通过环境变量传递，不触�
   });
   assert.equal(prepared.version, '9.0.0');
   assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].args.slice(0, 4), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command'], '解压不得依赖用户已放开系统脚本策略');
   assert.equal(calls[1].options.env.ELECTRON_RUN_AS_NODE, '1');
   assert.ok(calls.every(call => call.options.windowsHide));
   assert.equal(fs.readFileSync(path.join(plan.runtimeDir, 'state.json'), 'utf8'), '{"syntheticTask":"keep"}');
