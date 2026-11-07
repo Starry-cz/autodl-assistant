@@ -569,6 +569,15 @@ textarea { resize: vertical; line-height: 1.65; }
 .balance-list dt { color: var(--muted); font-size: var(--font-small); }
 .balance-list dd { margin: 0; font-size: var(--font-section); font-weight: 500; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .billing-transactions-section { padding-top: 24px; border-top: 1px solid var(--line); }
+.billing-transactions-section > .section-heading { flex-wrap: wrap; gap: 12px; margin-bottom: 14px; }
+#billing-transactions-toggle { flex: none; min-height: 44px; }
+/* 展开只增加流水区域的高度，表头固定；金额与时间继续使用原表格格式。 */
+#billing-transactions { overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+#billing-transactions.is-expanded { max-height: min(420px, 60vh); }
+#billing-transactions:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+#billing-transactions .ledger-table { border-collapse: separate; border-spacing: 0; }
+#billing-transactions th { position: sticky; top: 0; z-index: 1; }
+#billing-transactions tr:last-child td { border-bottom: 0; }
 .ledger-table { width: 100%; border-collapse: collapse; text-align: left; font-size: var(--font-small); }
 .ledger-table caption { padding-bottom: 12px; color: var(--muted); text-align: left; font-size: var(--font-small); line-height: 1.65; }
 .ledger-table th { color: var(--text-secondary); font-size: var(--font-meta); font-weight: 600; background: var(--surface); }

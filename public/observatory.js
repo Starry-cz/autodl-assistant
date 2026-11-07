@@ -4,6 +4,9 @@
 (() => {
   let targetId = '', targetOwner = null;
   let pending = '', lastRefresh = 0, range = 14, selectedDay = '';
+  // 流水默认只预览最近五条；展开属于当前账号的阅读状态，普通轮询不会重置。
+  const LEDGER_PREVIEW_ROWS = 5;
+  let ledgerExpanded = false;
   const currency = new Intl.NumberFormat('zh-CN', { style:'currency', currency:'CNY', minimumFractionDigits:2, maximumFractionDigits:3 });
   const chinaTime = new Intl.DateTimeFormat('zh-CN', { timeZone:'Asia/Shanghai', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false });
   const moneyMilli = n => Number.isFinite(n) ? currency.format(n / 1000) : '—';
@@ -121,7 +124,22 @@
     }
     html('billing-breakdown', groups.size ? '<table class="ledger-table"><caption>近 ' + range + ' 天' + (partial ? '已读取' : '') + '消费构成</caption><thead><tr><th>项目</th><th>金额</th></tr></thead><tbody>' + [...groups].map(([name,amount]) => '<tr><td>' + esc(name) + '</td><td>' + moneyMilli(amount) + '</td></tr>').join('') + '</tbody></table>' : empty(data?.checkedAt ? '当前区间没有可归类的消费记录。' : '同步后查看消费构成。'));
     const recent = [...items].sort((a,b) => b.at - a.at).slice(0,50);
-    html('billing-transactions', recent.length ? '<table class="ledger-table"><caption>最近 ' + recent.length + ' 条已读取流水' + (recent.some(i => i.date === null) ? '（含日期待确认项）' : '') + '</caption><thead><tr><th>北京时间</th><th>项目 / 实例</th><th>类型</th><th>金额</th></tr></thead><tbody>' + recent.map(i => '<tr><td>' + (i.at ? when(i.at) : '日期未知') + '</td><td>' + esc(i.name || i.instanceId || '—') + '</td><td>' + esc(i.typeLabel || i.type) + '</td><td>' + moneyMilli(Number.isFinite(i.amountMilli) ? i.amountMilli : i.transactionMilli) + '</td></tr>').join('') + '</tbody></table>' : empty(data?.checkedAt ? '当前区间暂无流水。' : '同步后查看近期流水。'));
+    renderTransactions(recent, !!data?.checkedAt);
+  }
+  function renderTransactions(recent, synced) {
+    const hasMore = recent.length > LEDGER_PREVIEW_ROWS;
+    if(!hasMore)ledgerExpanded = false;
+    const shown = ledgerExpanded ? recent : recent.slice(0, LEDGER_PREVIEW_ROWS);
+    const button = $('#billing-transactions-toggle'), list = $('#billing-transactions');
+    button.hidden = !hasMore;
+    button.textContent = ledgerExpanded ? '收起流水' : '展开最近 ' + recent.length + ' 条';
+    button.setAttribute('aria-expanded', String(ledgerExpanded));
+    list.classList.toggle('is-expanded', ledgerExpanded);
+    $('#billing-transactions-count').hidden = !recent.length;
+    set('billing-transactions-count', recent.length
+      ? (ledgerExpanded || !hasMore ? '最近 ' + recent.length + ' 条已读取流水' : '显示最近 ' + shown.length + ' 条 · 可展开查看 ' + recent.length + ' 条') + (recent.some(i => i.date === null) ? ' · 含日期待确认项' : '')
+      : synced ? '当前区间暂无流水。' : '同步后查看近期流水。');
+    html('billing-transactions', shown.length ? '<table class="ledger-table" aria-label="近期流水"><thead><tr><th scope="col">北京时间</th><th scope="col">项目 / 实例</th><th scope="col">类型</th><th scope="col">金额</th></tr></thead><tbody>' + shown.map(i => '<tr><td>' + (i.at ? when(i.at) : '日期未知') + '</td><td>' + esc(i.name || i.instanceId || '—') + '</td><td>' + esc(i.typeLabel || i.type) + '</td><td>' + moneyMilli(Number.isFinite(i.amountMilli) ? i.amountMilli : i.transactionMilli) + '</td></tr>').join('') + '</tbody></table>' : empty(synced ? '当前区间暂无流水。' : '同步后查看近期流水。'));
   }
   function renderChart(rows) {
     if(!rows.length){html('billing-chart','');$('#billing-chart-tooltip').hidden = true;return;}
@@ -186,7 +204,12 @@
   $('#fleet-refresh').addEventListener('click',()=>void sync('overview'));
   $('#billing-refresh').addEventListener('click',()=>void sync('billing'));
   $('#fleet-search').addEventListener('input',renderFleet);$('#fleet-status').addEventListener('change',renderFleet);
-  $('#billing-range').addEventListener('change',e=>{range=Number(e.target.value);selectedDay='';renderBilling();});
+  $('#billing-range').addEventListener('change',e=>{range=Number(e.target.value);selectedDay='';ledgerExpanded=false;$('#billing-transactions').scrollTop=0;renderBilling();});
+  $('#billing-transactions-toggle').addEventListener('click',()=>{
+    ledgerExpanded=!ledgerExpanded;
+    // 收起时回到最新记录；按钮留在滚动区外，无需先滚完全部流水。
+    $('#billing-transactions').scrollTop=0;renderBilling();
+  });
   $('#overview-targets').addEventListener('change',e=>{if(e.target.id==='overview-target-select')selectTarget(e.target.value);});
   for(const id of ['overview-targets','fleet-list'])$('#'+id).addEventListener('click',e=>{
     const target=e.target.closest('[data-monitor-instance]'),boot=e.target.closest('[data-configure-boot]');
@@ -200,7 +223,7 @@
   setInterval(()=>{const view=document.querySelector('.nav-item.active')?.dataset.view;if(automatic.checked&&!document.hidden&&['overview','fleet'].includes(view)&&Date.now()-lastRefresh>=30000)void sync('overview',true);},30000);
   window.addEventListener('appstatechange',()=>{
     const owner=appState.account?.identity?.ownerId || (appState.account?.enabled?'':'local');
-    if(owner!==targetOwner){targetOwner=owner;targetId=owner?localStorage.getItem('autodl.overview.target.'+owner)||'':'';}
+    if(owner!==targetOwner){targetOwner=owner;targetId=owner?localStorage.getItem('autodl.overview.target.'+owner)||'':'';ledgerExpanded=false;$('#billing-transactions').scrollTop=0;}
     renderAll();
   });
   window.addEventListener('appviewchange',event=>{renderAll();if(event.detail.view==='billing')requestAnimationFrame(showLatestDates);});
