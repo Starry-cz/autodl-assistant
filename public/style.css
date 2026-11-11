@@ -613,7 +613,7 @@ textarea { resize: vertical; line-height: 1.65; }
 #ai > .page-heading p { max-width: 72ch; }
 .settings-panel { max-width: none; padding: 0; border: 0; border-radius: 0; }
 .settings-channels { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.settings-channel { min-width: 0; padding: 24px 24px 24px 0; }
+.settings-channel { display: flex; flex-direction: column; min-width: 0; padding: 24px 24px 24px 0; }
 .settings-channel + .settings-channel { padding-left: 24px; padding-right: 0; border-left: 1px solid var(--line); }
 .channel-heading { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 20px; }
 .channel-heading > svg { width: 22px; height: 22px; margin-top: 3px; flex: none; }
@@ -634,6 +634,13 @@ textarea { resize: vertical; line-height: 1.65; }
 .settings-save-row { display: flex; align-items: center; justify-content: flex-end; gap: 16px; padding-top: 20px; border-top: 1px solid var(--line); }
 .settings-save-row .button { border-radius: 999px; padding-inline: 24px; min-height: 44px; }
 .settings-save-row p { margin: 0 auto 0 0; color: var(--muted); font-size: var(--font-small); }
+/* 测试入口贴近各自渠道，两列按钮对齐；结果用文字与颜色共同表达，不依赖短暂弹窗。 */
+.channel-test { margin-top: auto; padding-top: 16px; }
+.channel-test .button { min-height: 44px; }
+.channel-test-status { min-height: 44px; margin: 10px 0 0; color: var(--muted); font-size: var(--font-small); line-height: 1.6; overflow-wrap: anywhere; }
+.channel-test-status[data-state=success], #notification-save-status[data-state=success] { color: var(--success); }
+.channel-test-status[data-state=error], #notification-save-status[data-state=error] { color: var(--danger); }
+.channel-test-status[data-state=pending] { color: var(--text-secondary); }
 .view:not(.hidden) { animation: view-enter .18s ease-out; }
 @keyframes view-enter { from { opacity: .6; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 .ai-panel h2 { margin-bottom: 16px; }

@@ -35,6 +35,10 @@ function Save-CurrentInstallation {
 
 try {
     $explicitRuntime = [bool]$env:AUTODL_RUNTIME_DIR
+    # 旧入口转发到新版之前先固定显式相对资料路径，避免相对路径随后按新版目录解释。
+    if ($explicitRuntime -and -not [IO.Path]::IsPathRooted($env:AUTODL_RUNTIME_DIR)) {
+        $env:AUTODL_RUNTIME_DIR = [IO.Path]::GetFullPath((Join-Path $projectRoot $env:AUTODL_RUNTIME_DIR))
+    }
     $projectVersion = (Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Encoding UTF8 -Raw | ConvertFrom-Json).version
     $listenPort = if ($env:PORT) { [int]$env:PORT } else { 8787 }
     if ($listenPort -lt 1 -or $listenPort -gt 65535) { throw 'PORT 必须为 1 至 65535 的整数。' }

@@ -42,7 +42,88 @@ test('真实执行未经费用确认不创建任务，重复真实任务被阻�
 });
 test('通知配置保存但API始终掩码凭证，不发真实通知',async t=>{
   const f=await localApp(t);const response=await f.request('/api/notifications/settings',{webhookEnabled:true,webhookUrl:'https://isolated.example.test/notify',webhookToken:'synthetic-test-secret'});assert.equal(response.status,200);
+  const saved=await response.json();assert.equal(saved.settings.webhookToken,'***');assert.equal(saved.settings.webhookUrl,'***');assert.equal(JSON.stringify(saved).includes('synthetic-test-secret'),false);
   const state=await (await f.request('/api/state')).json();assert.equal(state.settings.webhookToken,'***');assert.equal(state.settings.webhookUrl,'***');assert.equal(JSON.stringify(state).includes('synthetic-test-secret'),false);
+});
+
+test('测试通知接口需本机授权，使用保存的配置且不创建任务或通知队列', async t => {
+  const f = await localApp(t), sent = [];
+  f.app.engine.notifier.fetch = async (url, options) => { sent.push({ url, options }); return new Response(null, { status: 204 }); };
+  const route = '/api/notifications/test';
+  assert.equal((await fetch(f.base + route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"channel":"webhook"}' })).status, 403);
+  assert.equal((await fetch(f.base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Local-Token': f.app.token, Origin: 'https://untrusted.example.test' }, body: '{"channel":"webhook"}' })).status, 403);
+  assert.equal((await f.request(route, { channel: 'webhook' })).status, 400);
+  assert.equal((await f.request(route, { channel: 'other' })).status, 400);
+  assert.equal(sent.length, 0);
+  await f.request('/api/notifications/settings', { webhookEnabled: true, webhookUrl: 'https://saved.example.test/notify', webhookToken: 'saved-synthetic-token', rememberCredentials: false });
+  // 请求中额外附带的地址和 Token 不得覆盖已保存配置。
+  const response = await f.request(route, { channel: 'webhook', webhookUrl: 'https://unsaved.example.test', webhookToken: 'unsaved-token' });
+  const result = await response.json(); assert.equal(response.status, 200); assert.equal(result.test.success, true);
+  assert.equal(sent.length, 1); assert.equal(sent[0].url, 'https://saved.example.test/notify'); assert.equal(sent[0].options.headers.Authorization, 'Bearer saved-synthetic-token');
+  assert.equal(JSON.stringify(result).includes('saved-synthetic-token'), false);
+  assert.equal(f.app.store.tasks().length, 0); assert.equal(f.app.store.data.notifications.length, 0);
+  const repeated = await f.request(route, { channel: 'webhook' }); assert.equal(repeated.status, 429); assert.match((await repeated.json()).message, /秒后再试/); assert.equal(sent.length, 1);
+});
+
+test('测试通知明确返回业务失败而非成功，保存新配置不会混用旧回执', async t => {
+  const f = await localApp(t);
+  await f.request('/api/notifications/settings', { wechatEnabled: true, wechatToken: 'synthetic-wechat-private', rememberCredentials: false });
+  f.app.engine.notifier.fetch = async () => Response.json({ code: 'InvalidToken', msg: 'synthetic-wechat-private 已失效' });
+  const failed = await f.request('/api/notifications/test', { channel: 'wechat' }), data = await failed.json();
+  assert.equal(failed.status, 200); assert.equal(data.test.success, false); assert.equal(data.test.code, 'NOTIFICATION_REJECTED');
+  assert.match(data.test.message, /已失效/); assert.equal(JSON.stringify(data).includes('synthetic-wechat-private'), false);
+  await f.request('/api/notifications/settings', { webhookEnabled: true, webhookUrl: 'https://saved.example.test/notify', rememberCredentials: false });
+  let entered, release; const entry = new Promise(resolve => entered = resolve), hold = new Promise(resolve => release = resolve);
+  f.app.engine.notifier.fetch = async () => { entered(); await hold; return new Response(null, { status: 204 }); };
+  const pending = f.request('/api/notifications/test', { channel: 'webhook' }); await entry;
+  try { await f.request('/api/notifications/settings', { webhookEnabled: true, webhookUrl: 'https://changed.example.test/notify', rememberCredentials: false }); }
+  finally { release(); }
+  const changed = await pending; assert.equal(changed.status, 409); assert.equal((await changed.json()).error, 'NOTIFICATION_CONTEXT_CHANGED');
+});
+
+test('通知配置修订阻止旧页面误发到新地址或覆盖新配置，修订随状态持久化', async t => {
+  const f = await localApp(t), sent = [];
+  f.app.engine.notifier.fetch = async url => { sent.push(url); return new Response(null, { status: 204 }); };
+  const oldState = await (await f.request('/api/state')).json();
+  assert.equal(oldState.notificationSettingsRevision, 0);
+  const save = async (url, revision) => (await f.request('/api/notifications/settings', {
+    webhookEnabled: true, webhookUrl: url, rememberCredentials: false, expectedRevision: revision,
+  })).json();
+  const first = await save('https://first.example.test/notify', 0);
+  const second = await save('https://second.example.test/notify', first.notificationSettingsRevision);
+  assert.equal(first.notificationSettingsRevision, 1); assert.equal(second.notificationSettingsRevision, 2);
+  assert.equal(second.settings.webhookUrl, '***');
+  // 两个地址都显示同一掩码，旧页必须依靠修订号拒绝发送，不能凭表单字符串判断相同。
+  for (const [route, body] of [
+    ['/api/notifications/test', { channel: 'webhook', expectedRevision: first.notificationSettingsRevision }],
+    ['/api/notifications/settings', { ...first.settings, expectedRevision: first.notificationSettingsRevision }],
+  ]) {
+    const response = await f.request(route, body); assert.equal(response.status, 409);
+    assert.equal((await response.json()).error, 'NOTIFICATION_SETTINGS_CHANGED');
+  }
+  assert.deepEqual(sent, []); assert.equal(f.app.store.data.settings.webhookUrl, 'https://second.example.test/notify');
+  const current = await (await f.request('/api/state')).json();
+  assert.equal(current.notificationSettingsRevision, 2);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json'), 'utf8')).notificationSettingsRevision, 2);
+  const delivered = await f.request('/api/notifications/test', { channel: 'webhook', expectedRevision: 2 });
+  assert.equal((await delivered.json()).test.success, true); assert.deepEqual(sent, ['https://second.example.test/notify']);
+});
+
+test('通知配置保存失败回滚修订和设置，无效修订不改变当前配置', async t => {
+  const f = await localApp(t);
+  await f.request('/api/notifications/settings', { wechatEnabled: true, wechatToken: 'synthetic-notification-token', rememberCredentials: false });
+  const before = f.app.store.data.settings, revision = f.app.store.data.notificationSettingsRevision;
+  for (const expectedRevision of [-1, null, '1']) {
+    const invalid = await f.request('/api/notifications/settings', { wechatEnabled: false, expectedRevision });
+    assert.equal(invalid.status, 400); assert.equal(f.app.store.data.settings, before);
+  }
+  const original = f.app.store.save;
+  f.app.store.save = () => { throw Error('合成写盘失败'); };
+  try {
+    const failed = await f.request('/api/notifications/settings', { wechatEnabled: false, expectedRevision: revision });
+    assert.equal(failed.status, 500); assert.equal(f.app.store.data.settings, before);
+    assert.equal(f.app.store.data.notificationSettingsRevision, revision);
+  } finally { f.app.store.save = original; }
 });
 test('单进程运行锁拒绝第二实例，关闭后移除且可再次启动',async t=>{
   const f=await localApp(t);assert.throws(()=>createApplication({runtimeDir:f.dir,startEngine:false}),/已有服务/);await f.app.close();assert.equal(fs.existsSync(path.join(f.dir,'server.lock')),false);

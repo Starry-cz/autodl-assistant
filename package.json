@@ -1,6 +1,6 @@
 {
   "name": "autodl-gpu-watch",
-  "version": "1.5.0",
+  "version": "2.0.0",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -36,6 +36,7 @@
     "test:workspace-ui": "node scripts/workspace-ui-smoke.mjs",
     "test:market-ui": "node scripts/market-ui-smoke.mjs",
     "test:updates-ui": "node scripts/updates-ui-smoke.mjs",
+    "test:notifications-ui": "node scripts/notification-test-ui-smoke.mjs",
     "test:task-monitor-ui": "node scripts/task-monitor-ui-smoke.mjs",
     "test:parallel-inventory": "node scripts/parallel-inventory-smoke.mjs"
   },

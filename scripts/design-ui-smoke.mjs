@@ -225,7 +225,7 @@ try {
   await form.locator('button[type=submit]').click();
   assert.equal((await saved).status(), 200);
   await page.waitForFunction(() => document.querySelector('#settings-form [name=webhookUrl]').value === '***');
-  assert.deepEqual(posts, [settings]);
+  assert.deepEqual(posts, [{...settings, expectedRevision:0}]);
   for (const [name, value] of Object.entries(settings)) assert.equal(app.store.data.settings[name], value, `通知字段 ${name}`);
 
   // 生成规则规划和内存模型报告，覆盖旧动态结果里的辅助文本，而不只检查静态设置页。

@@ -5,7 +5,7 @@
   <meta name="local-token" content="__LOCAL_TOKEN__">
   <title>AutoDL 抢卡助手 · 本地工作台</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="stylesheet" href="/style.css">
-  <script src="/task-monitor.js" defer></script><script src="/app.js" defer></script><script src="/account.js" defer></script><script src="/images.js" defer></script><script src="/ai.js" defer></script><script src="/plan.js" defer></script><script src="/observatory.js" defer></script><script src="/market.js" defer></script><script src="/profile.js" defer></script><script src="/updates.js" defer></script>
+  <script src="/task-monitor.js" defer></script><script src="/app.js" defer></script><script src="/notification-settings.js" defer></script><script src="/account.js" defer></script><script src="/images.js" defer></script><script src="/ai.js" defer></script><script src="/plan.js" defer></script><script src="/observatory.js" defer></script><script src="/market.js" defer></script><script src="/profile.js" defer></script><script src="/updates.js" defer></script>
 </head>
 <body>
   <aside class="sidebar">
@@ -250,6 +250,10 @@
               <label>接收地址<input name="webhookUrl" type="text" placeholder="https://你的服务/notify" autocomplete="off"></label>
               <label>Bearer Token <span class="optional-tag">可选</span><input name="webhookToken" type="password" autocomplete="new-password" placeholder="接收服务需要验证时填写"></label>
               <p class="hint">使用通用 JSON 格式，字段见 README。需要签名或特殊格式的机器人，请通过自己的服务转发。</p>
+              <div class="channel-test">
+                <button id="test-webhook" type="button" class="button" aria-describedby="webhook-test-status" disabled>发送测试通知</button>
+                <p id="webhook-test-status" class="channel-test-status" role="status" aria-live="polite" aria-atomic="true">保存并启用此渠道后，即可测试。</p>
+              </div>
             </section>
             <section class="settings-channel" aria-labelledby="wechat-channel-title">
               <div class="channel-heading">
@@ -259,6 +263,10 @@
               <label class="check-label switch-label"><span>启用 AutoDL 微信通知</span><input type="checkbox" name="wechatEnabled"></label>
               <label>开发者 Token<input name="wechatToken" type="password" autocomplete="new-password" placeholder="填写 AutoDL 账号的开发者 Token"></label>
               <p class="hint">请先在 AutoDL 绑定微信，并从账号设置获取开发者 Token。本工具不会代你创建 Token 或绑定账号。</p>
+              <div class="channel-test">
+                <button id="test-wechat" type="button" class="button" aria-describedby="wechat-test-status" disabled>发送测试通知</button>
+                <p id="wechat-test-status" class="channel-test-status" role="status" aria-live="polite" aria-atomic="true">保存并启用此渠道后，即可测试。</p>
+              </div>
             </section>
           </div>
           <!-- 凭据保存方式对两个渠道同时生效，放在渠道配置之后统一管理。 -->
@@ -266,7 +274,7 @@
             <label class="check-label"><input type="checkbox" name="rememberCredentials" checked>在本机加密记住通知凭据</label>
             <div id="notification-storage-hint" class="hint">不勾选时，仅在本次服务中使用。勾选后由当前 Windows 用户加密保存。</div>
           </div>
-          <div class="settings-save-row"><button class="button primary" type="submit">保存通知设置</button></div>
+          <div class="settings-save-row"><p id="notification-save-status" role="status" aria-live="polite"></p><button id="reload-notification-settings" class="button" type="button" hidden>载入最新配置</button><button class="button primary" type="submit">保存通知设置</button></div>
         </form>
       </section>
     </section>

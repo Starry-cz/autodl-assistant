@@ -149,6 +149,18 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
   function visibleCatalog(){return !accountEnabled||visibleIdentity()&&store.data.gpuCatalogOwnerId===identity.ownerId?store.data.gpuCatalog:null;}
   function clearAccountCache(){instanceSync={instances:[],checkedAt:null,error:null};pricePreview=null;observatory.clear();market.clear();}
   function pauseAccountTasks(){for(const task of store.tasks())if(['queued','watching','preparing','submitting','verifying'].includes(task.state))engine.control(task,'pause');}
+  // 地址和 Token 对外均为掩码；单调修订号让多个页面识别配置变化，不读取或比较明文凭据。
+  function replaceNotificationSettings(settings) {
+    store.data.settings = settings;
+    store.data.notificationSettingsRevision = (store.data.notificationSettingsRevision ?? 0) + 1;
+  }
+  function checkNotificationRevision(data) {
+    // 旧版页面没有修订号；新版在保存和测试前都校验，避免旧掩码覆盖新凭据或误发到新地址。
+    if (data.expectedRevision === undefined) return;
+    if (!Number.isSafeInteger(data.expectedRevision) || data.expectedRevision < 0) fail('CONFIG', '通知配置修订号无效，请刷新页面');
+    if (data.expectedRevision !== (store.data.notificationSettingsRevision ?? 0))
+      fail('NOTIFICATION_SETTINGS_CHANGED', '其他页面已修改通知配置，请载入最新配置后再操作', { status: 409 });
+  }
   async function connectIdentity({allowSwitch=false}={}) {
     if(!accountEnabled)return null;
     let next;
@@ -164,7 +176,7 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
       if(previousOwner){
         pauseAccountTasks();wallet.clearToken();
         // 自动通知及余额凭据不会沿用到另一个账号；本机 AI 配置独立保留。
-        store.data.settings={...store.data.settings,webhookEnabled:false,wechatEnabled:false,wechatToken:''};
+        replaceNotificationSettings({...store.data.settings,webhookEnabled:false,wechatEnabled:false,wechatToken:''});
       }
       store.data.accountOwnerId=next.ownerId;store.save();
     }
@@ -308,7 +320,7 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
     return data;
   }
   // 一个后台生命周期只服务启动时的静态文件，避免磁盘覆盖后出现新页面配旧路由。
-  const assets = {'/':'index.html','/index.html':'index.html','/app.js':'app.js','/task-monitor.js':'task-monitor.js','/account.js':'account.js','/updates.js':'updates.js','/images.js':'images.js','/ai.js':'ai.js','/plan.js':'plan.js','/observatory.js':'observatory.js','/market.js':'market.js','/profile.js':'profile.js','/style.css':'style.css','/favicon.svg':'favicon.svg'};
+  const assets = {'/':'index.html','/index.html':'index.html','/app.js':'app.js','/notification-settings.js':'notification-settings.js','/task-monitor.js':'task-monitor.js','/account.js':'account.js','/updates.js':'updates.js','/images.js':'images.js','/ai.js':'ai.js','/plan.js':'plan.js','/observatory.js':'observatory.js','/market.js':'market.js','/profile.js':'profile.js','/style.css':'style.css','/favicon.svg':'favicon.svg'};
   const staticContent = new Map([...new Set(Object.values(assets))].map(asset => [asset,fs.readFileSync(path.join(ROOT,'public',asset),'utf8')]));
   const server = http.createServer(async(req,res)=>{
     if(closing) res.setHeader('Connection','close');
@@ -478,7 +490,7 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
             const result=await adapters.autodl.logout();
             if(data.clearCredentials===true) {
               ai.clearKey();wallet.clearToken();
-              store.data.settings={webhookEnabled:false,wechatEnabled:false,rememberCredentials:false};store.save();
+              replaceNotificationSettings({webhookEnabled:false,wechatEnabled:false,rememberCredentials:false});store.save();
             }
             return {...result,paused,credentialsCleared:data.clearCredentials===true};
           },{verifyIdentity:false}); // 登录已过期时仍必须允许正常退出和清除专用会话。
@@ -529,9 +541,19 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
           return json(res,201,{task});
         }
         if(url.pathname === '/api/notifications/settings') {
-          const previous=store.data.settings;store.data.settings=normalizeNotifications(data,previous);
-          try {store.save();} catch(error) {store.data.settings=previous;throw error;}
-          return json(res,200,{ok:true,message:'已保存。外部渠道仅在任务发现资源、完成、失败或需处理时发送通知'});
+          checkNotificationRevision(data);
+          const previous=store.data.settings, revision=store.data.notificationSettingsRevision ?? 0;
+          replaceNotificationSettings(normalizeNotifications(data,previous));
+          try {store.save();} catch(error) {store.data.settings=previous;store.data.notificationSettingsRevision=revision;throw error;}
+          return json(res,200,{ok:true,message:'通知设置已保存，可发送测试通知确认接收',settings:store.publicState().settings,
+            notificationSettingsRevision:store.data.notificationSettingsRevision});
+        }
+        if(url.pathname === '/api/notifications/test') {
+          // 测试与保存配置使用相同的本机访问保护，不需要操作 AutoDL 浏览器或创建任务。
+          checkNotificationRevision(data);
+          const owner = visibleIdentity()?.ownerId ?? null, savedOwner = store.data.accountOwnerId;
+          const result = await notifier.test(data.channel, {isCurrent:()=>owner===(visibleIdentity()?.ownerId ?? null)&&savedOwner===store.data.accountOwnerId});
+          return json(res,200,{ok:true,test:result});
         }
         if(url.pathname === '/api/notifications/read') {
           const visible=accountEnabled?filterAccountNotifications(store.data.notifications,store.tasks(),visibleIdentity()):store.data.notifications;

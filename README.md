@@ -14,14 +14,14 @@
 | [4. 单文件在线安装](#method-4) | 本机浏览器网页 | 不需要，首次自动下载 | 希望只下载一个小文件 |
 | [5. 两条 PowerShell 命令](#method-5) | 本机浏览器网页 | 不需要，首次自动下载 | 希望用命令安装，或指定安装目录 |
 
-本文下载链接对应 **v1.5.0**。第 1、2 种自带运行环境；第 3、4、5 种首次运行需要联网下载 Node.js（如本机缺少）、依赖和浏览器组件。它们不要求安装 Git。
+本文下载链接对应 **v2.0.0**。第 1、2 种自带运行环境；第 3、4、5 种首次运行需要联网下载 Node.js（如本机缺少）、依赖和浏览器组件。它们不要求安装 Git。
 
 **系统要求：**桌面包支持 Windows 10/11 x64；源码网页版提供 x64 / ARM64 环境下载路径。已在 Windows 10 x64 验证，未在 Windows 11 或 ARM64 实机验证；当前不提供 macOS、Linux 和 ARM64 桌面安装包。
 
 <a id="method-1"></a>
 ## 1. EXE 安装包：像普通软件一样安装（推荐）
 
-1. [下载 v1.5.0 桌面安装包](https://github.com/Starry-cz/autodl-assistant/releases/download/v1.5.0/autodl-assistant-desktop-1.5.0-setup-x64.exe)。文件名以 **setup-x64.exe** 结尾。
+1. [下载 v2.0.0 桌面安装包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.0/autodl-assistant-desktop-2.0.0-setup-x64.exe)。文件名以 **setup-x64.exe** 结尾。
 2. 下载完成后，双击这个 EXE。安装到当前 Windows 用户，不需要管理员权限，也不用安装 Node.js、npm 或浏览器环境。
 3. 安装完成后，打开桌面的 **AutoDL助手桌面版**。也可以从 Windows 开始菜单找到同名程序。
 4. 按下方[首次登录与使用](#first-use)连接 AutoDL，然后使用监控室或创建抢卡任务。
@@ -33,7 +33,7 @@
 <a id="method-2"></a>
 ## 2. 便携 ZIP：全部解压后直接运行
 
-1. [下载 v1.5.0 完整便携包](https://github.com/Starry-cz/autodl-assistant/releases/download/v1.5.0/autodl-assistant-desktop-1.5.0-win-x64.zip)。文件名以 **win-x64.zip** 结尾。
+1. [下载 v2.0.0 完整便携包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.0/autodl-assistant-desktop-2.0.0-win-x64.zip)。文件名以 **win-x64.zip** 结尾。
 2. 右键 ZIP，选择 **全部解压**，放到自己有写入权限的固定文件夹，例如 `D:\AutoDL桌面版`（有 D 盘时）。
 3. 打开解压后的文件夹，双击 **AutoDL Assistant.exe**。这是完整桌面程序，不需要先安装 Node.js 或运行任何 CMD。
 4. 按下方[首次登录与使用](#first-use)完成登录。
@@ -47,7 +47,7 @@
 <a id="method-3"></a>
 ## 3. 源码网页版：下载源码，双击启动
 
-1. [下载 v1.5.0 完整源码包](https://github.com/Starry-cz/autodl-assistant/releases/download/v1.5.0/autodl-assistant-v1.5.0.zip)。如果希望取得尚未发布的修改，也可在仓库主页选择 **Code → Download ZIP** 下载 `main` 分支；`main` 会持续变化，与固定版本包可能不同。
+1. [下载 v2.0.0 完整源码包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.0/autodl-assistant-v2.0.0.zip)。如果希望取得尚未发布的修改，也可在仓库主页选择 **Code → Download ZIP** 下载 `main` 分支；`main` 会持续变化，与固定版本包可能不同。
 2. 右键 ZIP，选择 **全部解压**，放到有写入权限的固定目录，例如 `D:\AutoDL助手`。不要在 ZIP 内运行。
 3. 进入项目目录，确认同一层能看到 **package.json、public、src、scripts、启动抢卡助手.cmd**。若只看到一个项目文件夹，继续打开这一层。
 4. 双击 **启动抢卡助手.cmd**。首次会依次准备运行环境、安装依赖、检查浏览器，再启动后台。保持联网并等待“启动成功”，不要在下载途中关闭窗口。
@@ -62,7 +62,7 @@
 <a id="method-4"></a>
 ## 4. 单文件在线安装：只下载一个 CMD
 
-1. [下载 v1.5.0 在线安装启动器](https://github.com/Starry-cz/autodl-assistant/releases/download/v1.5.0/autodl-assistant-setup.cmd)。这是一个小的安装引导文件，**不是离线安装包**。
+1. [下载 v2.0.0 在线安装启动器](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.0/autodl-assistant-setup.cmd)。这是一个小的安装引导文件，**不是离线安装包**。
 2. 双击 **autodl-assistant-setup.cmd**，保持联网。它会下载完整源码，再自动准备环境并启动网页版。
 3. 默认安装位置是 `%LOCALAPPDATA%\AutoDL-Assistant`。可将这个路径粘贴到资源管理器地址栏查看。
 4. 等待“安装和启动完成”。浏览器会打开 [http://127.0.0.1:8787](http://127.0.0.1:8787)，随后按[首次登录与使用](#first-use)连接账号。
@@ -82,7 +82,7 @@
 2. 先粘贴下面第一条命令，按回车，等待下载结束：
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Starry-cz/autodl-assistant/v1.5.0/install.ps1" -OutFile "$env:TEMP\install-autodl.ps1"
+Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Starry-cz/autodl-assistant/v2.0.0/install.ps1" -OutFile "$env:TEMP\install-autodl.ps1"
 ```
 
 3. 再粘贴下面第二条命令，按回车，等待安装和启动完成：
@@ -138,6 +138,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\install-autod
 | 软件更新 | 查看版本、检查和安装更新，以及本机运行状态 |
 
 点击设置侧栏顶部的 **返回工作台**，会回到最近使用的工作页面。页面切换会同步到地址栏，浏览器的后退、前进也可以在已访问页面间切换。
+
+### 测试微信或 Webhook 通知
+
+1. 点击左下角头像 → **账号设置** → 设置侧栏的 **通知**。
+2. 启用所需渠道并填好配置。微信需要先在 AutoDL 绑定微信，并填写开发者 Token；Webhook 需要支持本程序消息格式的 HTTPS 接收地址，Bearer Token 按接收服务要求填写。
+3. 点击 **保存通知设置**。页面还有未保存修改时，测试按钮不可用。
+4. 点击对应渠道的 **发送测试通知**。按钮下方会显示发送时间、成功结果或失败原因；微信成功表示 AutoDL 已接受请求，还需在手机微信确认收到。
+5. 失败时按提示检查 Token、微信绑定、接收地址或网络。测试不会创建抢卡任务，也不会自动重试；微信测试与任务提醒共用发送限额，限速时按提示等待再试。
+
+Webhook 以 JSON POST 发送 `id`、`event`、`title`、`name`、`content`、`taskId` 和 `timestamp`，并带有 `Idempotency-Key`。测试消息的 `event` 为 `test`、`taskId` 为 `null`；接收服务应允许该测试类型。
 
 ## 版本检查与更新
 
@@ -241,6 +251,6 @@ npm.cmd run desktop:dev
 
 Windows x64 打包使用 `npm.cmd run desktop:build`，产物位于 `output/desktop`。从源码构建需要联网下载依赖和配套浏览器；分发的完整桌面包已包含这些环境。
 
-[日常操作速查](安装与使用说明.md) · [更新日志](CHANGELOG.md) · [v1.5.0 验证范围](docs/RELEASE-1.5.0.md) · [MIT License](LICENSE)
+[日常操作速查](安装与使用说明.md) · [更新日志](CHANGELOG.md) · [MIT License](LICENSE)
 
 本项目为独立工具，与 AutoDL 官方无隶属关系。

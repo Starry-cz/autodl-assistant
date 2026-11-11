@@ -100,6 +100,7 @@ export class Store {
   }
   publicState() {
     return {
+      notificationSettingsRevision: this.data.notificationSettingsRevision ?? 0,
       tasks: this.data.tasks.filter(t=>t.config.provider==='autodl').map(t => ({ ...t, logs: t.logs.slice(-80) })),
       notifications: this.data.notifications.filter(n=>!this.data.tasks.some(t=>t.id===n.taskId && t.config.provider!=='autodl')).slice(-100).reverse().map(({ deliveries, ...n }) => ({ ...n, deliveries })),
       settings: { ...this.data.settings,

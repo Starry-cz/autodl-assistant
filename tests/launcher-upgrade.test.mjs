@@ -74,7 +74,8 @@ test('源码与在线安装升级：保留资料、旧入口转发、拒绝降�
   // 用另一个已安装旧版目录检验 install.ps1 的升级分支，与前面的源码路径彼此独立。
   result = await stop(); assert.equal(result.code,0,result.output);
   const onlineRoot = path.join(directory,'在线安装 [旧版]'); copyProject(onlineRoot,'1.2.0');
-  const onlineRuntime = path.join(onlineRoot,'.runtime'), onlineEnv = {...env,AUTODL_RUNTIME_DIR:onlineRuntime,AUTODL_INSTALL_ROOT:onlineRoot};
+  // 未经启动器登记的已有安装也可能显式指定资料目录；侧装新版不能把相对目录移到新版程序内。
+  const onlineRuntime = path.join(directory,'自定义资料 [保留]'), onlineEnv = {...env,AUTODL_RUNTIME_DIR:path.relative(onlineRoot,onlineRuntime),AUTODL_INSTALL_ROOT:onlineRoot};
   new Store(onlineRuntime).save(); fs.writeFileSync(path.join(onlineRuntime,'retained.txt'),'keep');
   const archiveServer = http.createServer((req,res)=>{res.writeHead(200,{'Content-Type':'application/zip'});fs.createReadStream(zip).pipe(res);});
   await new Promise(resolve=>archiveServer.listen(0,'127.0.0.1',resolve));
@@ -92,8 +93,16 @@ test('源码与在线安装升级：保留资料、旧入口转发、拒绝降�
     assert.equal(fs.readFileSync(path.join(onlineRuntime,'retained.txt'),'utf8'),'keep');
     result = await ps(path.join(onlineRoot,'scripts/start-local.ps1'),['-NoOpen','-NoPause'],onlineEnv,directory);
     assert.equal(result.code,0,result.output); assert.equal((await health()).pid,current.pid);
+    result = await run(process.execPath,[path.join(onlineRoot,'scripts/stop-server.mjs')],onlineEnv,directory);
+    assert.equal(result.code,0,result.output);
+    result = await ps(path.join(onlineRoot,'scripts/start-local.ps1'),['-NoOpen','-NoPause'],onlineEnv,directory);
+    assert.equal(result.code,0,result.output); assert.equal((await health()).runtimeDir,onlineRuntime);
+    assert.equal(fs.readFileSync(path.join(onlineRuntime,'retained.txt'),'utf8'),'keep');
   } finally {
-    await run(process.execPath,[path.join(onlineRoot,'scripts/stop-server.mjs')],onlineEnv,directory);
+    // 回归失败时也根据此隔离安装的实际资料目录正常收尾，不把错误路径传给停止入口。
+    const actual = await health().catch(() => null);
+    if (actual?.projectRoot.startsWith(onlineRoot + path.sep))
+      await run(process.execPath,[path.join(onlineRoot,'scripts/stop-server.mjs')],{...onlineEnv,AUTODL_RUNTIME_DIR:actual.runtimeDir},directory);
     await new Promise(resolve=>archiveServer.close(resolve));
   }
 });

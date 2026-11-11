@@ -134,6 +134,17 @@ function assertPrivateHidden(state) {
   assert.equal(state.wallet.snapshot, null);
 }
 
+test('测试通知发送期间换号，不将原账号回执返回为新账号发送成功', async t => {
+  const f = await fixture(t); await f.connect();
+  await f.request('/api/notifications/settings', { webhookEnabled: true, webhookUrl: 'https://synthetic.invalid/test-account-a', rememberCredentials: false });
+  let entered, release; const entry = new Promise(resolve => entered = resolve), hold = new Promise(resolve => release = resolve);
+  f.app.engine.notifier.fetch = async () => { entered(); await hold; return new Response(null, { status: 204 }); };
+  const pending = f.request('/api/notifications/test', { channel: 'webhook' }); await entry;
+  try { await f.connect(ACCOUNT_B); } finally { release(); }
+  const result = await pending; assert.equal(result.status, 409); assert.equal(result.body.error, 'NOTIFICATION_CONTEXT_CHANGED');
+  assert.equal(f.app.store.tasks().length, 0); assert.equal(f.app.store.data.notifications.length, 0);
+});
+
 test('任务控制的账号核验遵守页面锁，忙碌时不会读错页面并清空连接', async t => {
   const f = await fixture(t); await f.connect();
   const task = f.seedTask({ ownerId: ACCOUNT_A.ownerId, state: 'paused' });
@@ -409,6 +420,24 @@ test('真实 Engine.step 在未确认账号、错误账号及身份失效时暂�
   assert.equal(failed.attempts, 0);
   assertPrivateHidden(await f.state());
   assert.equal(f.probes, 0);
+});
+
+test('切换账号和清除凭据推进通知配置修订，旧页面不能恢复先前的通知配置', async t => {
+  const f = await fixture(t); await f.connect();
+  const saved = await f.request('/api/notifications/settings', { expectedRevision: 0,
+    wechatEnabled: true, wechatToken: 'synthetic-account-notification-token', rememberCredentials: false });
+  assert.equal(saved.body.notificationSettingsRevision, 1);
+  await f.connect(ACCOUNT_B);
+  assert.equal((await f.state()).notificationSettingsRevision, 2);
+  const stale = await f.request('/api/notifications/settings', { ...saved.body.settings, expectedRevision: 1 });
+  assert.equal(stale.status, 409); assert.equal(stale.body.error, 'NOTIFICATION_SETTINGS_CHANGED');
+  assert.equal(f.app.store.data.settings.wechatEnabled, false);
+  await f.request('/api/browser/logout', { clearCredentials: true });
+  assert.equal((await f.state()).notificationSettingsRevision, 3);
+  await f.connect(ACCOUNT_A);
+  assert.equal((await f.state()).notificationSettingsRevision, 4);
+  const oldTest = await f.request('/api/notifications/test', { channel: 'wechat', expectedRevision: 1 });
+  assert.equal(oldTest.status, 409); assert.deepEqual(f.delivered, []);
 });
 
 test('通知读取和发送只处理当前账号，断开会话时不外发旧通知', async t => {

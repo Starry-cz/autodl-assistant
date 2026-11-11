@@ -6,7 +6,7 @@
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$releaseVersion = '1.5.0'
+$releaseVersion = '2.0.0'
 $downloadUrl = "https://github.com/Starry-cz/autodl-assistant/releases/download/v$releaseVersion/autodl-assistant-v$releaseVersion.zip"
 $temporaryDirectory = $null
 $temporaryParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
@@ -96,7 +96,11 @@ try {
 
     if ($existingProject) {
         $env:AUTODL_INSTALL_ROOT = $installationPath
-        $env:AUTODL_RUNTIME_DIR = if ($pointer -and $pointer.runtimeDir) { $pointer.runtimeDir } else { Join-Path $installationPath '.runtime' }
+        # 显式指定的资料目录优先；相对路径以原安装目录解析，不能跟随侧装目录迁移。
+        $env:AUTODL_RUNTIME_DIR = if ($env:AUTODL_RUNTIME_DIR) {
+            if ([IO.Path]::IsPathRooted($env:AUTODL_RUNTIME_DIR)) { [IO.Path]::GetFullPath($env:AUTODL_RUNTIME_DIR) }
+            else { [IO.Path]::GetFullPath((Join-Path $installationPath $env:AUTODL_RUNTIME_DIR)) }
+        } elseif ($pointer -and $pointer.runtimeDir) { $pointer.runtimeDir } else { Join-Path $installationPath '.runtime' }
     }
     Start-InstalledProject $targetPath
 } catch {

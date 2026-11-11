@@ -299,7 +299,7 @@ async function refresh(){
     }
     $('#connection').textContent='已连接';$('#last-updated').textContent='最后同步 '+time(appState.now);renderServer();renderModelCatalog();renderBrowser();
     renderTasks();renderNotifications();window.renderUpdates?.(appState.updates);if(detailId&&$('#task-dialog').open)renderDetail();
-    if(!initialSettings){initialSettings=true;const form=$('#settings-form');for(const key of Object.keys(appState.settings)){if(form.elements[key]){if(form.elements[key].type==='checkbox')form.elements[key].checked=appState.settings[key];else form.elements[key].value=appState.settings[key];}}}
+    window.notificationSettings?.sync(!initialSettings);if(window.notificationSettings)initialSettings=true;
     window.dispatchEvent(new Event('appstatechange'));
   }catch(e){$('#connection').textContent='已断开';$('#last-updated').textContent='服务未连接，监测可能已经停止';void window.recoverUpdatedBackend?.(e).catch(()=>{});}finally{fetching=false;}
 }
@@ -489,7 +489,6 @@ $('#check-browser').addEventListener('click',()=>void browserCommand('check'));
 $('#logout-browser').addEventListener('click',()=>{$('#logout-clear-credentials').checked=false;$('#logout-dialog').showModal();});
 $('#logout-cancel').addEventListener('click',()=>$('#logout-dialog').close());
 $('#confirm-logout').addEventListener('click',async()=>{const button=$('#confirm-logout');button.disabled=true;try{await browserCommand('logout',{clearCredentials:$('#logout-clear-credentials').checked});}finally{button.disabled=false;}});
-$('#settings-form').addEventListener('submit',async e=>{e.preventDefault();const form=e.target,data=Object.fromEntries(new FormData(form));data.rememberCredentials=form.elements.rememberCredentials.checked;data.webhookEnabled=form.elements.webhookEnabled.checked;data.wechatEnabled=form.elements.wechatEnabled.checked;try{const result=await api('/api/notifications/settings',data);initialSettings=false;toast(result.message);await refresh();}catch(error){toast(error.message,true);}});
 $('#read-notifications').addEventListener('click',async()=>{try{await api('/api/notifications/read',{});await refresh();}catch(error){toast(error.message,true);}});
 $('#desktop-notify').addEventListener('click',async()=>{if(!('Notification'in window)){toast('当前浏览器不支持桌面通知，请配置微信或 Webhook',true);return;}const result=await Notification.requestPermission();toast(result==='granted'?'桌面提醒已开启，请保持本页面打开':'未启用桌面通知，站内消息仍会保留');});
 function tickClock(){$('#clock').textContent=new Date().toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});}
