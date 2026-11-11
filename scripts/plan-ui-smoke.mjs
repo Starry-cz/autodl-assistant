@@ -35,10 +35,20 @@ try {
   await page.route('**/*', route => new URL(route.request().url()).origin === base ? route.continue() : route.abort());
   await page.goto(base); await page.waitForFunction(() => document.querySelector('#connection').textContent === '已连接');
   await page.locator('[data-view=ai]').click();
+  // 结果容器显示不代表渲染成功；等本次请求和提交收尾，再核验页面完成状态，捕获被界面处理的渲染错误。
+  const submitPlan = async () => {
+    const [response] = await Promise.all([
+      page.waitForResponse(response => response.url() === base + '/api/plan' && response.request().method() === 'POST'),
+      page.locator('#plan-submit').click(),
+    ]);
+    assert.equal(response.ok(), true);
+    await page.waitForFunction(() => !document.querySelector('#plan-submit').disabled);
+    assert.match(await page.locator('#plan-status').textContent(), /分析完成/);
+  };
   // 1) 只用规则：不调用模型
   assert.equal(await page.locator('#plan-form [name=useModel]').isDisabled(), true);
   await page.locator('#plan-form [name=projectText]').fill(PROJECT);
-  await page.locator('#plan-submit').click(); await page.locator('#plan-results').waitFor({ state: 'visible' });
+  await submitPlan(); await page.locator('#plan-results').waitFor({ state: 'visible' });
   const text = await page.locator('#plan-results').textContent();
   assert.match(text, /读出的条件/); assert.match(text, /==2\.1\.0/); assert.match(text, /待确认/); assert.match(text, /RTX 4090/);
   assert.match(text, /最大的 28GB/); assert.match(text, /不满足条件的型号/); assert.equal(calls, 0);
@@ -59,8 +69,7 @@ try {
   await page.waitForFunction(() => !document.querySelector('#plan-form [name=useModel]').disabled);
   await page.locator('#plan-form [name=request]').fill('推理 Vicuna-13B');
   await page.locator('#plan-form [name=useModel]').check(); await page.locator('#plan-form [name=consent]').check();
-  await page.locator('#plan-submit').click();
-  await page.waitForFunction(() => document.querySelector('#plan-status').textContent.includes('分析完成'));
+  await submitPlan();
   const modelText = await page.locator('#plan-results').textContent();
   assert.match(modelText, /模型补充 1 条/); assert.match(modelText, /≥ 28GB/); assert.match(modelText, /引用不是输入资料中的原文/); assert.equal(calls, 1);
   assert.match(modelText, /不满足条件的型号（3）/); assert.match(modelText, /单卡显存 24GB，低于所需 28GB/);

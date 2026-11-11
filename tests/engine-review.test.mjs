@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AppError } from '../src/errors.mjs';
 import { AutoDLBrowserAdapter } from '../src/adapters/autodl.mjs';
-import { fixture } from './helpers.mjs';
+import { fixture, gate } from './helpers.mjs';
 
 // 全部使用合成实例及隔离 Store，不启动浏览器、不访问 AutoDL 或发送通知。
 function unresolved(f, state = 'paused') {
@@ -86,4 +86,25 @@ test('已取消任务经人工核对清除提交后仍停止，并保留前后�
   assert.deepEqual(f.task.submitRejections.at(-1).baselineIds, operation.baselineIds);
   await f.due();
   assert.equal(f.submissions, 0);
+});
+
+// 人工操作的身份读取与实例读取共用互斥锁；测试不访问真实账号或云端接口。
+for (const action of ['attach', 'recheck']) test(`${action}：持锁核验账号后才读取目标，核验失败保留提交记录`, async t => {
+  const f = fixture(t), operation = unresolved(f), entered = gate(), release = gate();
+  let reads = 0;
+  f.engine.verifyOwner = async () => {
+    assert.equal(f.engine.busy, true, '账号核验必须位于互斥区间');
+    entered.resolve(); await release.promise;
+    throw new AppError('ACCOUNT_IDENTITY', '合成账号核验失败');
+  };
+  f.adapter.attach = f.adapter.recheckSubmission = async () => { reads++; return {}; };
+  const pending = action === 'attach' ? f.engine.attach(f.task, 'synthetic-target') : f.engine.recheck(f.task);
+  const rejected = assert.rejects(pending, error => error.code === 'ACCOUNT_IDENTITY');
+  await entered.promise;
+  await f.engine.tick();
+  assert.equal(f.task.attempts, 0); assert.equal(reads, 0);
+  release.resolve(); await rejected;
+  assert.equal(f.engine.busy, false);
+  assert.equal(f.task.state, 'paused'); assert.equal(f.task.operation, operation);
+  assert.equal(reads, 0);
 });

@@ -38,7 +38,8 @@ function renderPlan(plan) {
     : plan.model ? '<p class="hint">模型补充 ' + esc(plan.model.accepted) + ' 条约束（' + esc(plan.model.meta?.model || '') + '，' + esc(((plan.model.meta?.elapsedMs || 0) / 1000).toFixed(1)) + ' 秒）' +
       (plan.model.summary ? '：' + esc(plan.model.summary) : '') + '</p>' + (plan.model.rejected?.length ? '<details><summary>丢弃 ' + esc(plan.model.rejected.length) + ' 条模型输出（引用核对未通过）</summary><ul>' +
       plan.model.rejected.map(r => '<li>' + esc(r.field) + ' = ' + esc(r.value) + '：' + esc(r.reason) + '</li>').join('') + '</ul></details>' : '') : '';
-  const catalog = plan.catalogCheckedAt ? '型号目录同步于 ' + time(plan.catalogCheckedAt, true) + '（' + sinceText(plan.catalogCheckedAt) + '），括号内是当时的空闲/总数，不是实时库存。' : '还没有同步 AutoDL 型号目录：请先在“资源监测”页登录并点“同步 AutoDL 型号”。';
+  // 复用公共时间格式化函数显示快照时间，避免引用已不存在的相对时间函数中断整个结果渲染。
+  const catalog = plan.catalogCheckedAt ? '型号目录同步于 ' + time(plan.catalogCheckedAt, true) + '，括号内是当时的空闲/总数，不是实时库存。' : '还没有同步 AutoDL 型号目录：请先在“资源监测”页登录并点“同步 AutoDL 型号”。';
   const notices = (plan.notices || []).map(n => '<p class="notice">' + esc(n) + '</p>').join('');
   panel.innerHTML = '<h2>规划结果 · 待你确认</h2>' + notices + model +
     '<div class="ai-result-section"><h3>读出的条件</h3>' + planConstraints(plan.constraints) + '</div>' +

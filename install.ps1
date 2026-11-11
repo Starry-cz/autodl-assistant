@@ -6,7 +6,7 @@
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$releaseVersion = '1.4.0'
+$releaseVersion = '1.5.0'
 $downloadUrl = "https://github.com/Starry-cz/autodl-assistant/releases/download/v$releaseVersion/autodl-assistant-v$releaseVersion.zip"
 $temporaryDirectory = $null
 $temporaryParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
@@ -49,7 +49,8 @@ try {
         if (-not (Test-Path -LiteralPath $installationPath -PathType Container)) {
             throw "安装路径已被文件占用：$installationPath。请使用 -InstallDir 指定其他目录。"
         }
-        if (@(Get-ChildItem -LiteralPath $installationPath -Force).Count -gt 0) {
+        $directoryEntries = @(Get-ChildItem -LiteralPath $installationPath -Force)
+        if ($directoryEntries.Count -gt 0) {
             $packagePath = Join-Path $installationPath 'package.json'
             $launcherPath = Join-Path $installationPath 'scripts/start-local.ps1'
             if ((Test-Path -LiteralPath $packagePath -PathType Leaf) -and (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
@@ -66,7 +67,10 @@ try {
                 }
                 if ($installed.name -eq 'autodl-gpu-watch') { $existingProject = $true }
             }
-            if (-not $existingProject) { throw "安装目录不为空且不是已安装的 AutoDL 助手：$installationPath。请指定空目录。" }
+            # 源码启动也会创建默认安装目录，仅写入数据位置登记；在线安装应保留它并继续，交由同一启动器承接原资料。
+            $registrationOnly = $installationPath -ieq [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'AutoDL-Assistant')) -and
+                $directoryEntries.Count -eq 1 -and $directoryEntries[0].Name -eq 'web-install.json' -and -not $directoryEntries[0].PSIsContainer
+            if (-not $existingProject -and -not $registrationOnly) { throw "安装目录不为空且不是已安装的 AutoDL 助手：$installationPath。请指定空目录。" }
         }
     }
 

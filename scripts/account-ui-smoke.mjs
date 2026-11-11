@@ -59,7 +59,8 @@ try {
  assert.equal(await field('cuda').inputValue(),'');assert.equal(await field('cuda').evaluate(n=>n.type==='hidden'&&!n.required),true);
  assert.equal(await field('gpuModel').inputValue(),'A100 80GB');assert.equal(await page.locator('#custom-gpu-field').isHidden(),true);assert.equal(await field('gpuModel').isDisabled(),false);assert.equal(await field('customGpuModel').isDisabled(),true);assert.equal(await field('gpuCount').inputValue(),'2');assert.equal(await field('gpuCount').isDisabled(),false);
  assert.deepEqual(await form.locator('[name=region]:checked').evaluateAll(ns=>ns.map(n=>n.value)),['北京B区']);assert.equal(await form.locator('[name=region]').evaluateAll(ns=>ns.every(n=>n.disabled)),true);
- await field('copyDataDisk').uncheck();assert.match(await page.locator('#copy-disk-note').textContent(),/仅克隆系统盘/);
+ // 检查实际复制范围及源实例保留语义，沿用界面精简后的说明。
+ await field('copyDataDisk').uncheck();const copyNote=await page.locator('#copy-disk-note').textContent();assert.match(copyNote,/只复制系统盘/);assert.match(copyNote,/数据盘文件不复制/);assert.match(copyNote,/源实例保留/);
  await page.locator('[data-mode=create]').click();assert.equal(await field('gpuModel').inputValue(),'L20');assert.equal(await field('gpuModel').isEnabled(),true);assert.equal(await field('gpuCount').inputValue(),'1');assert.deepEqual(await form.locator('[name=region]:checked').evaluateAll(ns=>ns.map(n=>n.value)),['北京B区','重庆A区']);
  await page.locator('[data-mode=clone]').click();assert.equal(await field('gpuModel').inputValue(),'A100 80GB');
  // 余额保护为可选项，本用例主动启用来验证余额不足/充足的行为。

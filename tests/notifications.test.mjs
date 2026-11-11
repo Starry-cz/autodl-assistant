@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Notifier } from '../src/notifications.mjs';
 import { Store } from '../src/store.mjs';
-import { fixture } from './helpers.mjs';
+import { fixture, gate } from './helpers.mjs';
 const success=()=>({ok:true,json:async()=>({code:0})});
 const queue=f=>f.store.enqueueNotification(f.task,'completed','【隔离演练】合成完成消息');
 
@@ -40,5 +40,63 @@ test('Webhook 回执只读取有限长度：超长回执不读进内存，按状
   const f = fixture(t); f.store.data.settings = { webhookEnabled: true, webhookUrl: 'https://isolated.example.test/notify' }; queue(f);
   const notifier = new Notifier(f.store, { clock: f.clock, fetchImpl: async () => new Response('x'.repeat(100000), { status: 200 }) });
   await notifier.flush(); assert.equal(f.store.data.notifications[0].deliveries.webhook.ok, true);
+});
+
+for (const channel of ['webhook', 'wechat']) test(`${channel} 回执流中断不能误报成功，恢复后按原退避重试`, async t => {
+  const f = fixture(t); queue(f);
+  f.store.data.settings = { [`${channel}Enabled`]: true, webhookUrl: 'https://isolated.example.test/notify', wechatToken: 'synthetic-only' };
+  // 模拟已经收到 HTTP 200，但读取业务回执时连接中断；不发送真实通知。
+  const notifier = new Notifier(f.store, { clock: f.clock, fetchImpl: async () => new Response(new ReadableStream({
+    start(controller) { controller.error(new Error('回执连接中断')); },
+  }), { status: 200 }) });
+  await notifier.flush();
+  const delivery = f.store.data.notifications[0].deliveries[channel];
+  assert.equal(delivery.ok, false); assert.equal(delivery.pending, false);
+  f.advance(15001); notifier.fetch = async () => success(); await notifier.flush();
+  assert.equal(f.store.data.notifications[0].deliveries[channel].ok, true);
+  assert.equal(f.store.data.notifications[0].deliveries[channel].attempts, 2);
+});
+
+test('微信需要明确成功回执，HTML、空对象及超长回执不能记为已送达', async t => {
+  for (const body of ['<html>upstream error</html>', '{}', 'x'.repeat(20000)]) {
+    const f = fixture(t); queue(f); f.store.data.settings = { wechatEnabled: true, wechatToken: 'synthetic-only' };
+    await new Notifier(f.store, { clock: f.clock, fetchImpl: async () => new Response(body) }).flush();
+    assert.equal(f.store.data.notifications[0].deliveries.wechat.ok, false);
+  }
+});
+
+test('通用 Webhook 允许无正文的 204，微信识别明确 Success 回执', async t => {
+  const f = fixture(t); queue(f);
+  f.store.data.settings = { webhookEnabled: true, webhookUrl: 'https://isolated.example.test/notify', wechatEnabled: true, wechatToken: 'synthetic-only' };
+  await new Notifier(f.store, { clock: f.clock, fetchImpl: async url => url.includes('example.test')
+    ? new Response(null, { status: 204 }) : Response.json({ code: 'Success', data: null }) }).flush();
+  assert.equal(f.store.data.notifications[0].deliveries.webhook.ok, true);
+  assert.equal(f.store.data.notifications[0].deliveries.wechat.ok, true);
+});
+
+test('停止时完成正在发送的回执，不再启动下一渠道；重启只补发未发送渠道', async t => {
+  const f = fixture(t), entered = gate(), release = gate(), sent = [];
+  f.store.data.settings = { webhookEnabled: true, webhookUrl: 'https://isolated.example.test/notify',
+    wechatEnabled: true, wechatToken: 'synthetic-only' };
+  queue(f);
+  const notifier = new Notifier(f.store, { clock: f.clock, fetchImpl: async url => {
+    sent.push(url);
+    if (sent.length === 1) { entered.resolve(); await release.promise; }
+    return success();
+  } });
+  // 用回执门控稳定复现“正在发送 Webhook 时退出”，不依赖网络时延。
+  const flushing = notifier.flush();
+  await entered.promise;
+  const stopping = notifier.stop();
+  release.resolve();
+  await Promise.all([flushing, stopping]);
+  assert.equal(sent.length, 1, '退出后不能再启动微信渠道');
+  const saved = new Store(f.dir, { clock: f.clock });
+  assert.equal(saved.data.notifications[0].deliveries.webhook.ok, true);
+  assert.equal(saved.data.notifications[0].deliveries.wechat, undefined);
+  await new Notifier(saved, { clock: f.clock, fetchImpl: async url => { sent.push(url); return success(); } }).flush();
+  assert.equal(sent.length, 2);
+  assert.equal(new URL(sent[1]).pathname, '/api/v1/wechat/message/send');
+  assert.equal(saved.data.notifications[0].deliveries.wechat.ok, true);
 });
 

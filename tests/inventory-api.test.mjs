@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { REGIONS } from '../src/config.mjs';
-import { readInventoryInPage, readAutodlInventory, inventoryRegions, readGpuCatalogApi,
+import { readInventoryInPage, readAutodlInventory, inventoryRegions, readGpuCatalogApi, readTaskGpuCatalogApi,
   inventoryHostQuery, inventoryHourlyPrice, normalizeInventoryHost, readMarketHostsApi } from '../src/adapters/autodl-inventory.mjs';
 import { fixture as engineFixture } from './helpers.mjs';
 
@@ -12,7 +12,7 @@ function pageFixture({ origin = 'https://www.autodl.com', storage = {}, data = [
   const values = { token: 'synthetic-token', user: '{}', app_version: '{"version":"synthetic-version"}', ...storage }, calls = [];
   return { calls, async run(kind, params = {}) {
     const result = await vm.runInNewContext(`(${readInventoryInPage.toString()})(input)`, {
-      URL, AbortSignal, location: { origin }, input: { kind, params },
+      URL, AbortSignal, AbortController, location: { origin }, input: { kind, params },
       localStorage: { getItem: key => values[key] ?? null },
       fetch: async (url, options) => {
         calls.push({ url, ...options, signal: undefined });
@@ -43,7 +43,24 @@ function adapterFixture({ regions = regionRows, gpus = gpuRows, membership = { m
   const calls = [];
   const adapter = { session: { state: 'ready' }, setSession(state) { this.session.state = state; },
     page: { isClosed: () => false, url: () => 'https://www.autodl.com/create', evaluate: async (fn, input) => {
-      assert.equal(fn, readInventoryInPage); calls.push(input);
+      assert.equal(fn, readInventoryInPage);
+      if (input.kind === 'task-gpus') {
+        // 批次在真实的页面闭包内编排，不能用顺序 mock 掩盖并发取消和请求数变化。
+        const result = await vm.runInNewContext(`(${fn.toString()})(input)`, {
+          URL, AbortSignal, AbortController, input, location: { origin: 'https://www.autodl.com' },
+          localStorage: { getItem: key => ({ token: 'synthetic-token', user: '{}' })[key] ?? null },
+          fetch: async (_url, options) => {
+            const params = JSON.parse(options.body); calls.push({ kind: 'gpus', params });
+            const value = typeof gpus === 'function' ? await gpus(params) : gpus;
+            if (value?.error === 'NETWORK') throw Error('synthetic-network');
+            const status = value?.error === 'AUTH' ? 401 : value?.error === 'TRANSIENT' ? 429 : 200;
+            return new Response(JSON.stringify({ code: value?.error === 'API' ? 'Failed' : 'Success',
+              data: value?.error === 'SCHEMA' ? null : value }), { status });
+          },
+        });
+        return JSON.parse(JSON.stringify(result));
+      }
+      calls.push(input);
       const value = { regions, gpus, membership, hosts }[input.kind];
       const data = typeof value === 'function' ? await value(input.params) : value;
       return data?.error ? data : { data };
@@ -186,6 +203,57 @@ test('任务 strict 目录在首个失败地区立即抛出原错误，看板仍
   const partial = adapterFixture({ gpus: params => params.region_sign_list[0].includes('west') ? { error: 'NETWORK' } : gpuRows });
   const result = await readGpuCatalogApi(partial.adapter, ['北京B区', '西北B区']);
   assert.equal(result.regions[0].models.length, 2); assert.match(result.regions[1].error, /失败/);
+});
+
+test('抢卡目录首区有空卡交还匹配，最多先发两个地区；看板仍读取完整目录', async () => {
+  const f = adapterFixture();
+  const result = await readTaskGpuCatalogApi(f.adapter, ['北京B区', '西北B区'], 'RTX 4090');
+  assert.deepEqual(f.calls.map(call => call.kind), ['regions', 'gpus', 'gpus']);
+  assert.deepEqual(result.regions.map(row => row.region), ['北京B区']);
+  assert.equal(result.regions[0].models[0].available, 2);
+  const fullFixture = adapterFixture({ gpus: params => params.region_sign_list[0].includes('west') ? { error: 'NETWORK' } : gpuRows });
+  const full = await readGpuCatalogApi(fullFixture.adapter, ['北京B区', '西北B区']);
+  assert.equal(full.regions.length, 2); assert.match(full.regions[1].error, /失败/);
+});
+
+test('抢卡目录并行结果保持地区顺序，全部为零时才完成所有地区读取', async () => {
+  const gpus = params => [{ 'RTX 4090': { idle_gpu_num: params.region_sign_list[0].includes('west') ? 1 : 0, total_gpu_num: 8 } }];
+  const f = adapterFixture({ gpus });
+  const result = await readTaskGpuCatalogApi(f.adapter, ['北京B区', '西北B区'], 'RTX 4090');
+  assert.deepEqual(result.regions.map(row => row.region), ['北京B区', '西北B区']);
+  assert.deepEqual(result.regions.map(row => row.models[0].available), [0, 1]);
+  assert.deepEqual(f.calls.slice(1).map(call => call.params.region_sign_list), [['synthetic-bj-1', 'synthetic-bj-2'], ['synthetic-west-1']]);
+  const empty = adapterFixture({ gpus: [{ 'RTX 4090': { idle_gpu_num: 0, total_gpu_num: 8 } }] });
+  const all = await readTaskGpuCatalogApi(empty.adapter, ['北京B区', '西北B区'], 'RTX 4090');
+  assert.equal(all.regions.length, 2); assert.equal(empty.calls.length, 3);
+  assert.ok(all.regions.every(row => row.models[0].available === 0));
+});
+
+test('抢卡目录未知、缺项、相近型号或同名歧义均立即交还DOM，不追加预筛或虚构零库存', async () => {
+  const zero = { idle_gpu_num: 0, total_gpu_num: 8 };
+  for (const gpus of [[], [{ 'RTX 4090D': zero }], [{ 'RTX 4090': { total_gpu_num: 8 } }],
+    [{ 'RTX 4090': { idle_gpu_num: 0 } }], [{ 'RTX 4090': { idle_gpu_num: 9, total_gpu_num: 8 } }],
+    [{ 'RTX 4090': zero }, { 'RTX 4090': zero }]]) {
+    const f = adapterFixture({ gpus });
+    const result = await readTaskGpuCatalogApi(f.adapter, ['北京B区', '西北B区'], 'RTX 4090');
+    assert.equal(result.regions.length, 1); assert.equal(f.calls.length, 3);
+  }
+  const missing = adapterFixture();
+  const result = await readTaskGpuCatalogApi(missing.adapter, ['佛山区', '北京B区'], 'RTX 4090');
+  assert.equal(result.regions[0].missing, true); assert.equal(result.regions.length, 1);
+  assert.deepEqual(missing.calls.map(call => call.kind), ['regions']);
+});
+
+test('抢卡目录当前查询失败仍上抛退避/登录错误，不把失败当作库存或继续查询', async () => {
+  for (const error of ['NETWORK', 'TRANSIENT', 'SCHEMA', 'AUTH']) {
+    const f = adapterFixture({ gpus: { error } });
+    await assert.rejects(readTaskGpuCatalogApi(f.adapter, ['北京B区', '西北B区'], 'RTX 4090'), failure => {
+      assert.equal(failure.retryable, ['NETWORK', 'TRANSIENT'].includes(error));
+      assert.equal(failure.code, error === 'AUTH' ? 'INVENTORY_AUTH' : 'INVENTORY_UNAVAILABLE');
+      return true;
+    });
+    assert.equal(f.calls.length, 3);
+  }
 });
 
 test('真实引擎遇到 strict 库存网络错误继续退避，登录或结构失效则停止自动检查', async t => {

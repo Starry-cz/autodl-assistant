@@ -1,21 +1,21 @@
 import { redact } from './errors.mjs';
 const CHANNELS = ['webhook', 'wechat'];
-// 只读取有限长度的回执正文；超过上限、不是 JSON 或读取中断时按空回执处理（状态码已表示成功）。
+// 通用 Webhook 可只用状态码确认；微信必须有业务成功回执。网络中断不能当成空正文成功。
 async function receipt(response, limit = 16384) {
-  const object = value => value && typeof value === 'object' ? value : {};
+  const object = value => value && typeof value === 'object' && !Array.isArray(value) ? value : null;
   const reader = response.body?.getReader?.();
-  if (!reader) return object(await response.json().catch(() => ({})));
+  if (!reader) return object(await response.json().catch(error => { if (error instanceof SyntaxError) return null; throw error; }));
   const chunks = []; let size = 0;
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > limit) { await reader.cancel().catch(() => {}); return {}; }
+      if (size > limit) { await reader.cancel().catch(() => {}); return null; }
       chunks.push(value);
     }
-  } catch { return {}; } finally { reader.releaseLock?.(); }
-  try { return object(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { return {}; }
+  } finally { reader.releaseLock?.(); }
+  try { return object(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { return null; }
 }
 export class Notifier {
   constructor(store, { fetchImpl = fetch, clock = () => Date.now(), canDeliver = () => true } = {}) {
@@ -39,7 +39,8 @@ export class Notifier {
         if(this.store.tasks().some(t=>t.id===n.taskId && t.config.provider!=='autodl')) continue;
         n.deliveries ||= {};
         for (const channel of CHANNELS) {
-          if(settings!==this.store.data.settings || !this.canDeliver(n))break;
+          // 退出只等待当前渠道回执落盘，未发送的渠道留给下次启动，避免退出期间又发起请求。
+          if(this.stopping || settings!==this.store.data.settings || !this.canDeliver(n))break;
           const previous = n.deliveries[channel] || {};
           const attempts = previous.attempts ?? (previous.ok === false ? n.attempts || 0 : 0);
           const now = this.clock();
@@ -73,8 +74,11 @@ export class Notifier {
             });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const body = await receipt(response);
-            if (body.success === false || (body.code != null && ![0,200,'0','200','Success'].includes(body.code)))
+            const successCode = [0,200,'0','200','Success'].includes(body?.code);
+            if (body?.success === false || (body?.code != null && !successCode))
               throw new Error('通知服务返回失败，请检查 Token、绑定与消息配额');
+            if (channel === 'wechat' && !successCode && body?.success !== true)
+              throw new Error('未收到微信发送成功回执，将按间隔重试');
             Object.assign(delivery, { ok: true, at: this.clock(), pending: false });
           } catch (error) {
             // 报错原文可能带出 Token（例如请求头无效时），写入状态前先替换已知的秘密值。

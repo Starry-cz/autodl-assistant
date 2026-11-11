@@ -13,53 +13,105 @@ export async function readInventoryInPage({ kind, params = {} }) {
     hosts: { method: 'POST', path: '/api/v1/user/machine/list' },
     membership: { method: 'GET', path: '/api/v1/user/member/detail' },
   };
-  const endpoint = endpoints[kind];
-  if (!endpoint || location.origin !== 'https://www.autodl.com') return { error: 'SESSION' };
+  if ((!endpoints[kind] && kind !== 'task-gpus') || location.origin !== 'https://www.autodl.com') return { error: 'SESSION' };
   try {
     const token = localStorage.getItem('token');
     if (!token) return { error: 'AUTH' };
     const user = JSON.parse(localStorage.getItem('user') || 'null');
     const app = JSON.parse(localStorage.getItem('app_version') || '{"version":"0.0.0"}');
     // 库存和会员接口都不在官网拦截器的例外表中，子账号统一替换此路径前缀。
-    const prefix = user?.sub_name ? '/api/v1/sub_user' : '/api/v1';
-    const url = new URL(endpoint.path.replace('/api/v1', prefix), location.origin);
-    const headers = { Authorization: token, AppVersion: String(app.version || '0.0.0') };
-    if (endpoint.method === 'POST') headers['Content-Type'] = 'application/json';
-    const response = await fetch(url.href, { method: endpoint.method, headers, credentials: 'include',
-      redirect: 'error', signal: AbortSignal.timeout(15000),
-      ...(endpoint.method === 'POST' ? { body: JSON.stringify(params) } : {}) });
-    if (response.status === 401 || response.status === 403) return { error: 'AUTH' };
-    if (!response.ok) return { error: response.status === 429 || response.status >= 500 ? 'TRANSIENT' : 'API' };
-    const result = await response.json();
-    if (localStorage.getItem('token') !== token) return { error: 'CHANGED' };
-    if (result?.code === 'AuthorizeFailed') return { error: 'AUTH' };
-    if (result?.code !== 'Success') return { error: 'API' };
-    const data = result.data;
+    const subName = user?.sub_name || '', prefix = subName ? '/api/v1/sub_user' : '/api/v1';
+    const sameSession = () => {
+      try { return localStorage.getItem('token') === token
+        && (JSON.parse(localStorage.getItem('user') || 'null')?.sub_name || '') === subName; }
+      catch { return false; }
+    };
     const pick = (value, keys) => Object.fromEntries(keys.filter(key => value && Object.hasOwn(value, key)
       && (value[key] === null || ['string', 'number', 'boolean'].includes(typeof value[key]))).map(key => [key, value[key]]));
-    if (kind === 'membership') {
-      if (!data || typeof data !== 'object' || Array.isArray(data)) return { error: 'SCHEMA' };
-      return { data: pick(data, ['member_level']) };
-    }
-    if (kind === 'regions') {
-      if (!Array.isArray(data)) return { error: 'SCHEMA' };
-      return { data: data.map(row => pick(row, ['data_center', 'region_name', 'region_sign', 'used_for', 'visible'])) };
-    }
-    if (kind === 'gpus') {
-      if (!Array.isArray(data) || data.some(row => !row || typeof row !== 'object' || Array.isArray(row))) return { error: 'SCHEMA' };
-      return { data: data.map(row => Object.fromEntries(Object.entries(row)
-        .map(([model, stock]) => [model, pick(stock, ['idle_gpu_num', 'total_gpu_num'])]))) };
-    }
-    if (!data || !Array.isArray(data.list)) return { error: 'SCHEMA' };
-    const list = data.list.map(row => ({
-      ...pick(row, ['machine_id', 'machine_alias', 'gpu_name', 'gpu_number', 'gpu_idle_num', 'region_name', 'region_sign',
-        'on_line', 'max_instance_num', 'binding_instance_num']),
-      machine_sku_info: Array.isArray(row?.machine_sku_info) ? row.machine_sku_info.map(sku => ({
-        ...pick(sku, ['type', 'current_price']),
-        level_config: Array.isArray(sku?.level_config) ? sku.level_config.map(level => pick(level, ['level_name', 'discount'])) : [],
-      })) : [],
-    }));
-    return { data: { list, ...pick(data, ['result_total', 'max_page']) } };
+    // 同一批读取共用网页内的身份快照和字段投影；凭据不传出页面，也不为并行复制另一套请求逻辑。
+    const query = async (queryKind, queryParams, cancelled = null) => {
+      try {
+        if (!sameSession()) return { error: 'CHANGED' };
+        const endpoint = endpoints[queryKind], url = new URL(endpoint.path.replace('/api/v1', prefix), location.origin);
+        const headers = { Authorization: token, AppVersion: String(app.version || '0.0.0') };
+        if (endpoint.method === 'POST') headers['Content-Type'] = 'application/json';
+        const timeout = AbortSignal.timeout(15000);
+        const response = await fetch(url.href, { method: endpoint.method, headers, credentials: 'include',
+          redirect: 'error', signal: cancelled ? AbortSignal.any([timeout, cancelled]) : timeout,
+          ...(endpoint.method === 'POST' ? { body: JSON.stringify(queryParams) } : {}) });
+        if (!sameSession()) return { error: 'CHANGED' };
+        if (response.status === 401 || response.status === 403) return { error: 'AUTH' };
+        if (!response.ok) return { error: response.status === 429 || response.status >= 500 ? 'TRANSIENT' : 'API' };
+        const result = await response.json();
+        if (!sameSession()) return { error: 'CHANGED' };
+        if (result?.code === 'AuthorizeFailed') return { error: 'AUTH' };
+        if (result?.code !== 'Success') return { error: 'API' };
+        const data = result.data;
+        if (queryKind === 'membership') {
+          if (!data || typeof data !== 'object' || Array.isArray(data)) return { error: 'SCHEMA' };
+          return { data: pick(data, ['member_level']) };
+        }
+        if (queryKind === 'regions') {
+          if (!Array.isArray(data)) return { error: 'SCHEMA' };
+          return { data: data.map(row => pick(row, ['data_center', 'region_name', 'region_sign', 'used_for', 'visible'])) };
+        }
+        if (queryKind === 'gpus') {
+          if (!Array.isArray(data) || data.some(row => !row || typeof row !== 'object' || Array.isArray(row))) return { error: 'SCHEMA' };
+          return { data: data.map(row => Object.fromEntries(Object.entries(row)
+            .map(([model, stock]) => [model, pick(stock, ['idle_gpu_num', 'total_gpu_num'])]))) };
+        }
+        if (!data || !Array.isArray(data.list)) return { error: 'SCHEMA' };
+        const list = data.list.map(row => ({
+          ...pick(row, ['machine_id', 'machine_alias', 'gpu_name', 'gpu_number', 'gpu_idle_num', 'region_name', 'region_sign',
+            'on_line', 'max_instance_num', 'binding_instance_num']),
+          machine_sku_info: Array.isArray(row?.machine_sku_info) ? row.machine_sku_info.map(sku => ({
+            ...pick(sku, ['type', 'current_price']),
+            level_config: Array.isArray(sku?.level_config) ? sku.level_config.map(level => pick(level, ['level_name', 'discount'])) : [],
+          })) : [],
+        }));
+        return { data: { list, ...pick(data, ['result_total', 'max_page']) } };
+      } catch {
+        // 主动结束其余只读查询属于批次收尾，不作为库存失败写回会话。
+        return { error: cancelled?.aborted ? 'CANCELLED' : 'NETWORK' };
+      }
+    };
+    if (kind !== 'task-gpus') return await query(kind, params);
+
+    const { groups, modelKey } = params, rows = new Array(groups.length), controller = new AbortController();
+    let cursor = 0, stopped = false, failure = null;
+    const stop = error => { failure = error || null; stopped = true; controller.abort(); };
+    const knownZero = data => {
+      const matches = data.flatMap(row => Object.entries(row))
+        .filter(([model]) => String(model).toUpperCase().replace(/[\s_-]/g, '') === modelKey);
+      if (matches.length !== 1) return false;
+      const stock = matches[0][1];
+      return Number.isSafeInteger(stock.total_gpu_num) && stock.total_gpu_num >= 0 && stock.idle_gpu_num === 0;
+    };
+    const worker = async () => {
+      while (!stopped && cursor < groups.length) {
+        const index = cursor++, group = groups[index];
+        if (!sameSession()) { stop('CHANGED'); return; }
+        if (!group.signs.length) {
+          rows[index] = { region: group.region, ...(group.error ? { error: group.error } : { missing: true }) };
+          stop(); return;
+        }
+        const result = await query('gpus', { region_sign_list: group.signs }, controller.signal);
+        // 已明确返回的会话错误优先于另一区的库存命中；主动取消不冒充登录失效。
+        if (result.error === 'AUTH' || result.error === 'CHANGED') { stop(result.error); return; }
+        // 命中/失败之后已取消的其他响应不再改变本批结果；最后仍会核对登录身份。
+        if (stopped) return;
+        if (result.error) { stop(result.error); return; }
+        rows[index] = { region: group.region, data: result.data };
+        if (!knownZero(result.data)) { stop(); return; }
+      }
+    };
+    // 只读预筛最多同时查询两个地区。首个非明确零即停止派发，取消并收齐其余请求后才允许主页面导航。
+    const workers = Array.from({ length: Math.min(2, groups.length) }, () => worker());
+    try { await Promise.all(workers); }
+    finally { controller.abort(); await Promise.allSettled(workers); }
+    if (!sameSession()) return { error: 'CHANGED' };
+    if (failure) return { error: failure };
+    return { data: rows.filter(Boolean) };
   } catch {
     // 平台响应和异常可能包含网页凭据，不把原文转交服务或日志。
     return { error: 'NETWORK' };
@@ -89,6 +141,11 @@ export async function readAutodlInventory(adapter, kind, params = {}) {
 const text = value => typeof value === 'string' ? value.trim() : typeof value === 'number' && Number.isFinite(value) ? String(value) : '';
 const count = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
 const sessionError = error => ['INVENTORY_SESSION', 'INVENTORY_AUTH'].includes(error?.code);
+const gpuModels = data => data.flatMap(row => Object.entries(row).map(([model, stock]) => {
+  const total = count(stock.total_gpu_num), available = count(stock.idle_gpu_num);
+  return { model, available: available !== null && total !== null && available > total ? null : available,
+    total, disabled: false };
+}));
 
 // 官网按 data_center 合并 region_sign，同一地区可能包含多个机房签名，不能只取第一条。
 export function inventoryRegions(rows, requested = REGIONS) {
@@ -107,18 +164,26 @@ export function inventoryRegions(rows, requested = REGIONS) {
   });
 }
 
-export async function readGpuCatalogApi(adapter, regions = REGIONS, { strict = false } = {}) {
+// 只有精确型号的完整、有效零库存证据才能省略主机读取；缺项、歧义和未知值仍需进入 DOM 核验。
+export function catalogRegionHasNoStock(row, model) {
+  if (!row || row.missing || row.disabled || row.error) return false;
+  const models = (row.models || []).filter(item => gpuKey(item.model) === gpuKey(model));
+  if (models.length !== 1) return false;
+  const stock = models[0];
+  return Number.isInteger(stock.available) && Number.isInteger(stock.total)
+    && stock.total >= 0 && stock.available === 0;
+}
+
+async function collectGpuCatalog(adapter, regions, { strict = false } = {}) {
   const groups = inventoryRegions(await readAutodlInventory(adapter, 'regions'), regions), rows = [];
   for (const group of groups) {
-    if (!group.signs.length) { rows.push({ region: group.region, models: [], ...(group.error ? { error: group.error } : { missing: true }) }); continue; }
+    if (!group.signs.length) {
+      rows.push({ region: group.region, models: [], ...(group.error ? { error: group.error } : { missing: true }) });
+      continue;
+    }
     try {
       const data = await readAutodlInventory(adapter, 'gpus', { region_sign_list: group.signs });
-      const models = data.flatMap(row => Object.entries(row).map(([model, stock]) => {
-        const total = count(stock.total_gpu_num), available = count(stock.idle_gpu_num);
-        return { model, available: available !== null && total !== null && available > total ? null : available,
-          total, disabled: false };
-      }));
-      rows.push({ region: group.region, models });
+      rows.push({ region: group.region, models: gpuModels(data) });
     } catch (error) {
       // 任务读取失败直接退避或暂停；看板允许展示明确标记的部分结果。
       if (strict || sessionError(error)) throw error;
@@ -126,6 +191,20 @@ export async function readGpuCatalogApi(adapter, regions = REGIONS, { strict = f
     }
   }
   return { checkedAt: Date.now(), regions: rows };
+}
+
+export async function readGpuCatalogApi(adapter, regions = REGIONS, { strict = false } = {}) {
+  return collectGpuCatalog(adapter, regions, { strict });
+}
+
+// 抢卡预筛只回答“是否全部明确无卡”；浏览器内以两个只读请求并行，首个非零/未知即可继续匹配。
+// 看板仍串行读取完整目录；任务的部分结果不冒充全市场快照，所有在途请求在本方法返回前收尾。
+export async function readTaskGpuCatalogApi(adapter, regions, model) {
+  const groups = inventoryRegions(await readAutodlInventory(adapter, 'regions'), regions);
+  const rows = await readAutodlInventory(adapter, 'task-gpus', { groups, modelKey: gpuKey(model) });
+  return { checkedAt: Date.now(), regions: rows.map(row => row.data
+    ? { region: row.region, models: gpuModels(row.data) }
+    : { ...row, models: [] }) };
 }
 
 export function inventoryHostQuery({ signs, model = '', pageIndex = 1, pageSize = 90 }) {

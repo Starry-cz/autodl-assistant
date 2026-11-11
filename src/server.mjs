@@ -194,15 +194,19 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
   }
   async function browserWork(work, { waitMs = 0, verifyIdentity = true, verifyAfter = true } = {}) {
     // waitMs：允许等待引擎完成当前一轮检查（镜像菜单在单独标签页读取，可与监测任务交替进行）。
-    for (const deadline = Date.now() + waitMs; engine.busy && !engine.stopping && Date.now() < deadline;) await new Promise(resolve => setTimeout(resolve, 50));
-    if(engine.busy || engine.stopping) fail('BUSY','正在执行页面操作，请稍后重试；如持续忙碌，请先暂停真实任务',{status:409});
-    engine.busy=true;
+    // 登记等待者：连续到期任务交接时不能重新抢走已有人等待的页面锁。
+    engine.browserWaiters++;
+    try {
+      for (const deadline = Date.now() + waitMs; engine.busy && !engine.stopping && Date.now() < deadline;) await new Promise(resolve => setTimeout(resolve, 50));
+      if(engine.busy || engine.stopping) fail('BUSY','正在执行页面操作，请稍后重试；如持续忙碌，请先暂停真实任务',{status:409});
+      engine.busy=true;
+    } finally { engine.browserWaiters--; engine.wake(); }
     try {
       if(verifyIdentity&&accountEnabled&&identity)await connectIdentity();
       const result=await work();
       if(verifyAfter&&verifyIdentity&&accountEnabled&&identity)await connectIdentity();
       return result;
-    } finally { engine.busy=false; }
+    } finally { engine.busy=false; engine.wake(); }
   }
   const reading = new Map();
   function browserRead(name, query, work, { waitMs = 0, afterRead, onError } = {}) {
@@ -543,12 +547,12 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
             if(result.session?.state==='ready')await connectIdentity({allowSwitch:true});
             else {identity=null;clearAccountCache();}
             return json(res,200,{...result,account:identity});
-          } finally {engine.busy=false;}
+          } finally {engine.busy=false;engine.wake();}
         }
         const matched = url.pathname.match(/^\/api\/tasks\/([\w-]+)\/(pause|resume|cancel|attach|verify-data|recheck)$/);
         if(matched) {
           const task=store.get(matched[1]);
-          if(accountEnabled){assertTaskOwner(task,visibleIdentity());if(!['pause','cancel'].includes(matched[2]))await verifyTaskOwner(task);}
+          if(accountEnabled)assertTaskOwner(task,visibleIdentity());
           if(matched[2] === 'attach') await engine.attach(task,data.instanceId);
           else if(matched[2] === 'recheck') {
             if(data.confirmed !== true) fail('CONFIRM','请确认已了解：仅在完整实例列表没有新增实例时才清除提交记录',{status:400});
@@ -556,11 +560,23 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
             return json(res,200,{task,result:await engine.recheck(task)});
           }
           else {
-            if (matched[2] === 'resume' && !task.operation) {
-              const duplicate = store.tasks().find(t => t !== task && t.ownerId===task.ownerId && blocksTask(t, task.config));
-              if (duplicate) throw conflictError(duplicate);
-            }
-            engine.control(task,matched[2],data);
+            const control = () => {
+              if (matched[2] === 'resume' && !task.operation) {
+                const duplicate = store.tasks().find(t => t !== task && t.ownerId===task.ownerId && blocksTask(t, task.config));
+                if (duplicate) throw conflictError(duplicate);
+              }
+              engine.control(task,matched[2],data);
+            };
+            // 暂停和停止必须立即生效；恢复及人工确认需要把账号核验与状态修改放在同一页面锁内。
+            // attach/recheck 在引擎内部持锁核验，不能在进入引擎前再次无锁读取账号页面。
+            if (['pause','cancel'].includes(matched[2]) || !accountEnabled) control();
+            else await browserWork(async () => {
+              const state = task.state, operation = task.operation;
+              await verifyTaskOwner(task);
+              if (task.state !== state || task.operation !== operation)
+                fail('TASK_CHANGED','核验期间任务状态已变化，请刷新后再操作',{status:409});
+              control();
+            }, { verifyIdentity:false, verifyAfter:false });
           }
           return json(res,200,{task});
         }

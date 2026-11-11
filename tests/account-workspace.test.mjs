@@ -134,6 +134,48 @@ function assertPrivateHidden(state) {
   assert.equal(state.wallet.snapshot, null);
 }
 
+test('任务控制的账号核验遵守页面锁，忙碌时不会读错页面并清空连接', async t => {
+  const f = await fixture(t); await f.connect();
+  const task = f.seedTask({ ownerId: ACCOUNT_A.ownerId, state: 'paused' });
+  let reads = 0;
+  f.adapter.readIdentity = async () => { reads++; throw Error('合成页面正在导航，账号读取被中断'); };
+  f.app.engine.busy = true;
+  try {
+    for (const action of ['resume', 'verify-data', 'attach', 'recheck']) {
+      const response = await f.request(`/api/tasks/${task.id}/${action}`, { confirmed: true, instanceId: 'synthetic-target' });
+      assert.equal(response.status, 409, action + ' 应先报告页面忙碌');
+      assert.equal(response.body.error, 'BUSY');
+      assert.equal(reads, 0, action + ' 不能绕过锁读取身份');
+      assert.equal((await f.state()).account.identity?.ownerId, ACCOUNT_A.ownerId, '忙碌不应导致账号意外断开');
+    }
+  } finally { f.app.engine.busy = false; }
+});
+
+test('恢复核验占有页面锁，核验中的后续取消不会被旧恢复请求覆盖', async t => {
+  const f = await fixture(t); await f.connect();
+  const task = f.seedTask({ ownerId: ACCOUNT_A.ownerId, state: 'paused', mode: 'boot',
+    operation: { id: 'synthetic-boot-operation', stage: 'accepted', receipt: { instanceId: OBSERVATORY_INSTANCE_ID } } });
+  let enter, release;
+  const entered = new Promise(resolve => { enter = resolve; });
+  const released = new Promise(resolve => { release = resolve; });
+  f.adapter.readIdentity = async () => { enter(); await released; return { ...ACCOUNT_A }; };
+  const resuming = f.request(`/api/tasks/${task.id}/resume`, {});
+  try {
+    await entered;
+    assert.equal(f.app.engine.busy, true, '账号核验与状态修改之间必须持有页面锁');
+    const busy = await f.request('/api/market/hosts', { model: 'RTX 4090' });
+    assert.equal(busy.body.error, 'BUSY');
+    const cancelled = await f.request(`/api/tasks/${task.id}/cancel`, {});
+    assert.equal(cancelled.status, 200, '停止不等待账号核验结束');
+    assert.equal(task.state, 'cancelled');
+  } finally { release(); }
+  const response = await resuming;
+  assert.equal(response.status, 409);
+  assert.equal(response.body.error, 'TASK_CHANGED');
+  assert.equal(task.state, 'cancelled');
+  assert.equal(f.app.engine.busy, false);
+});
+
 test('HTTP 新任务必须先确认账号，ownerId 与任务首次保存原子落盘', async t => {
   const f = await fixture(t);
   assertPrivateHidden(await f.state());

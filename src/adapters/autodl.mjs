@@ -8,7 +8,7 @@ import { validateCloneSource, validateBootSource } from '../instances.mjs';
 import { IMAGE_LEVELS, normalizeImagePrefix, imageLabel, imageCuda, exactImagePath } from '../images.mjs';
 import { readAutodlObservatory } from './autodl-observatory.mjs';
 import { readAutodlIdentity } from './autodl-account.mjs';
-import { readGpuCatalogApi, readMarketHostsApi } from './autodl-inventory.mjs';
+import { catalogRegionHasNoStock, readGpuCatalogApi, readTaskGpuCatalogApi, readMarketHostsApi } from './autodl-inventory.mjs';
 import { resolveBrowserLaunchOptions } from '../browser.mjs';
 const BASE = 'https://www.autodl.com';
 const LIST = `${BASE}/console/instance/list`;
@@ -712,17 +712,11 @@ export class AutoDLBrowserAdapter {
     if (t.config.mode === 'create') {
       // 型号汇总只用于确认“所有目标地区空闲为零”；不足所需卡数、未知或缺项仍进入原主机精确扫描。
       // 请求失败直接交给引擎退避，不再额外导航 DOM 形成第二次请求；克隆保持原源实例校验流程。
-      const catalog = await this.gpuCatalog(t.config.regions, { strict: true });
+      const catalog = await this.taskGpuCatalog(t.config.regions, t.config.gpuModel);
       catalogMs = Date.now() - started;
-      const noStock = t.config.regions.every(region => {
-        const row = catalog?.regions?.find(item => item.region === region);
-        if (!row || row.missing || row.disabled || row.error) return false;
-        const models = (row.models || []).filter(item => gpuKey(item.model) === gpuKey(t.config.gpuModel));
-        if (models.length !== 1) return false;
-        const model = models[0];
-        return Number.isInteger(model.available) && Number.isInteger(model.total)
-          && model.total >= 0 && model.available === 0;
-      });
+      // 预筛可能提前结束；只有全部所选地区均返回明确零库存时才不进入主机页面。
+      const noStock = t.config.regions.every(region => catalogRegionHasNoStock(
+        catalog?.regions?.find(item => item.region === region), t.config.gpuModel));
       if (noStock) {
         this.lastSource = null;
         return { source: null, hosts: [], complete: true, scope, catalogOnly: true,
@@ -879,6 +873,7 @@ export class AutoDLBrowserAdapter {
   }
   // 目录直接读取当前登录会话的只读接口；不导航或新建页面，任务提交仍走原表单核验。
   async gpuCatalog(regions, options) { return readGpuCatalogApi(this, regions, options); }
+  async taskGpuCatalog(regions, model) { return readTaskGpuCatalogApi(this, regions, model); }
   async selectImage(c) {
     const cascader = await this.openImageMenu();
     await this.chooseImagePath(c.imagePath);
@@ -923,10 +918,10 @@ export class AutoDLBrowserAdapter {
       // 复用时这些选项通常已是所需状态，只核对、不点击也不等待。
       await this.radio('按量计费'); await this.radio(candidate.region); await this.selectModel(c.gpuModel); await this.radio(String(c.gpuCount));
       // 主机排序可能把刚命中的候选移到更前页；先精确定位（必要时回第一页），再读取当前库存与报价。
-      // scanHosts 只向后翻页，不能先用它把仍在前页的候选误判为已被抢走。
+      // locateHost 已完成必要的翻页与加载等待；直接重读命中页，避免再次扫描并固定等待。
+      // 仍使用此刻 DOM 的库存、型号、驱动与价格，不沿用 probe 的旧候选快照。
       await this.locateHost(candidate.id);
-      const scan = await this.scanHosts(candidate.region,{config:c,source,untilId:candidate.id}), current = scan.hosts.find(h => h.id === candidate.id);
-      if (!current && scan.stalled) fail('PAGE_STUCK', '提交前找回候选主机时资源列表翻页没有前进；本次未提交', LIMITED_RETRY);
+      const current = (await this.readHosts(candidate.region, c.gpuModel)).find(h => h.id === candidate.id);
       if (!current || candidateReasons(current,c,source).length) throw new AppError('RESOURCE_GONE', '候选主机库存或价格已改变，继续监测', RACE);
       await this.radio(candidate.id);
       // 有的主机要求多卡起租（rent_mode，如“该主机2卡起租”）：选中后平台会把 GPU 数量改大或让原数量不可选。

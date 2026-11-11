@@ -14,9 +14,9 @@ function fixture(mode, pages, index = 1) {
   const task = { id: 'synthetic-task', config };
   const source = { id: config.sourceId, region: '北京B区', gpuModel: 'RTX 4090', gpuCount: 1,
     stopped: true, extraDiskGB: 0, sourceCuda: '12.1' };
-  const view = { index, firstClicks: 0, nextClicks: 0, selected: [], baselineClosed: 0, reads: 0 };
+  const view = { index, firstClicks: 0, nextClicks: 0, selected: [], baselineClosed: 0, reads: 0, settles: 0 };
   const visible = () => pages[view.index];
-  adapter.settle = async () => {};
+  adapter.settle = async () => { view.settles++; };
   adapter.selectModel = async () => {};
   adapter.radio = async name => { if (name === 'target') view.selected.push(name); };
   adapter.canReuseProbe = () => true;
@@ -61,6 +61,8 @@ test('当前页候选不回第一页；移到后页也只选择目标主机', as
   const current = fixture('create', [[row('other')], [row('target')]]);
   assert.equal((await current.prepare()).host.id, 'target');
   assert.equal(current.view.firstClicks, 0); assert.equal(current.view.nextClicks, 0);
+  // 当前页已精确命中时，只保留最终表单加载等待，不再完整扫描同一页。
+  assert.equal(current.view.settles, 1); assert.equal(current.view.reads, 1);
   const later = fixture('create', [[row('other0')], [row('other1')], [row('target')]]);
   assert.equal((await later.prepare()).host.id, 'target');
   assert.deepEqual(later.view.selected, ['target']); assert.equal(later.view.nextClicks, 2);

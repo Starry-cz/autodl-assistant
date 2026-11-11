@@ -14,7 +14,7 @@ function listAdapter(regions, { stuck = false } = {}) {
   const pages = () => regions[view.region];
   adapter.settle = async () => {}; adapter.checkPage = async () => {}; adapter.goto = async () => { view.gotoCalls++; };
   // 默认汇总未知，使原分页/筛选测试始终覆盖 DOM 路径；专项测试再提供明确库存。
-  adapter.gpuCatalog = async () => { view.catalogCalls++; return { checkedAt: Date.now(), regions: [] }; };
+  adapter.taskGpuCatalog = async () => { view.catalogCalls++; return { checkedAt: Date.now(), regions: [] }; };
   adapter.selectModel = async () => {};
   adapter.radio = async name => { view.radioCalls++; if (regions[name]) view.region = name; };
   adapter.page = { locator(selector) {
@@ -34,8 +34,8 @@ const config = (extra = {}) => testConfig({ gpuModel: 'RTX 4090', cuda: '12.8', 
 // 汇总与主机列表分别合成，验证零库存分支确实不导航、不读取 DOM，而非扫描后再丢弃结果。
 const catalogRegion = (region, extra = {}) => ({ region, models: [{ model: 'RTX 4090', available: 0, total: 8, ...extra }] });
 function catalogResult(adapter, view, regions) {
-  adapter.gpuCatalog = async (requested, options) => {
-    view.catalogCalls++; view.catalogRegions = [...requested]; view.catalogOptions = options;
+  adapter.taskGpuCatalog = async (requested, model) => {
+    view.catalogCalls++; view.catalogRegions = [...requested]; view.catalogModel = model;
     return { checkedAt: Date.now(), regions };
   };
 }
@@ -50,7 +50,7 @@ test('新租预筛：全部目标地区型号汇总明确零空闲时，主机 D
     adapter.prepared = { old: true }; adapter.probed = { old: true }; adapter.lastSource = { old: true };
     const probe = await adapter.probe({ config: config({ regions }) }, { scope });
     assert.equal(view.catalogCalls, 1); assert.deepEqual(view.catalogRegions, regions);
-    assert.deepEqual(view.catalogOptions, { strict: true });
+    assert.equal(view.catalogModel, 'RTX 4090');
     assert.equal(view.gotoCalls, 0); assert.equal(view.radioCalls, 0); assert.equal(view.reads, 0); assert.equal(view.nextClicks, 0);
     assert.deepEqual(probe.hosts, []); assert.equal(probe.source, null); assert.equal(probe.complete, true); assert.equal(probe.scope, scope);
     assert.equal(probe.catalogOnly, true); assert.equal(probe.catalogTotal, 16);
@@ -100,7 +100,7 @@ test('新租预筛：仍有空闲即继续扫描，不能将少于申请卡数�
 test('新租预筛：API 请求错误原样上抛供引擎退避，不再导航 DOM', async () => {
   const { adapter, view } = listAdapter({ 北京B区: [[row('a1')]] });
   const error = new AppError('CATALOG_NETWORK', '合成型号汇总请求失败', { retryable: true });
-  adapter.gpuCatalog = async (_regions, options) => { view.catalogCalls++; assert.deepEqual(options, { strict: true }); throw error; };
+  adapter.taskGpuCatalog = async (_regions, model) => { view.catalogCalls++; assert.equal(model, 'RTX 4090'); throw error; };
   await assert.rejects(adapter.probe({ config: config() }), caught => caught === error);
   assert.equal(view.catalogCalls, 1); assert.equal(view.gotoCalls, 0); assert.equal(view.radioCalls, 0); assert.equal(view.reads, 0);
 });
@@ -110,7 +110,7 @@ test('克隆不使用型号汇总预筛，仍打开源实例克隆页并扫描�
   const source = { id: 'synthetic-source', region: '北京B区', gpuModel: 'RTX 4090', gpuCount: 1 };
   let cloneCalls = 0;
   adapter.openClone = async () => { cloneCalls++; return source; };
-  adapter.gpuCatalog = async () => { throw Error('克隆不应读取型号汇总'); };
+  adapter.taskGpuCatalog = async () => { throw Error('克隆不应读取型号汇总'); };
   const probe = await adapter.probe({ config: config({ mode: 'clone' }) });
   assert.equal(cloneCalls, 1); assert.equal(view.gotoCalls, 0); assert.ok(view.reads > 0);
   assert.equal(probe.source, source); assert.equal(probe.hosts[0].id, 'a1'); assert.equal(probe.timing.catalogMs, 0);

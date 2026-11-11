@@ -154,6 +154,36 @@ test('不同镜像前缀独立等待页面锁，返回各自的查询结果', as
   assert.deepEqual(a.body.prefix, ['PyTorch']); assert.deepEqual(b.body.prefix, ['TensorFlow']);
 });
 
+test('连续到期任务之间让已排队的用户读取先执行，释放后继续监测', async t => {
+  const f = await fixture(t), firstEntered = gate(), firstRelease = gate(), secondEntered = gate(), events = [];
+  const originalTasks = f.app.store.tasks.bind(f.app.store), originalImage = f.adapter.imageOptions;
+  const jobs = [0, 1].map(id => ({ id, config: { provider: 'autodl' }, state: 'watching', nextCheckAt: Date.now() }));
+  // 调度测试只替换任务读取，不写入任何租用任务；HTTP 镜像读取仍走服务端真实页面锁。
+  f.app.store.tasks = () => jobs;
+  f.adapter.imageOptions = async (...args) => { events.push('image'); return originalImage(...args); };
+  f.app.engine.step = async task => {
+    events.push('task-' + task.id);
+    if (task.id === 0) { firstEntered.resolve(); await firstRelease.promise; }
+    else secondEntered.resolve();
+    task.state = 'found';
+  };
+  try {
+    f.app.engine.start(); await firstEntered.promise;
+    const arrived = gate();
+    const listener = req => { if (req.url === '/api/autodl/images') req.once('end', arrived.resolve); };
+    f.app.server.on('request', listener);
+    const reading = f.request('/api/autodl/images', { prefix: ['PyTorch'] });
+    await arrived.promise; await turn(); f.app.server.off('request', listener);
+    assert.equal(f.app.engine.browserWaiters, 1);
+    firstRelease.resolve();
+    assert.equal((await reading).status, 200);
+    await secondEntered.promise;
+    assert.deepEqual(events, ['task-0', 'image', 'task-1']);
+  } finally {
+    firstRelease.resolve(); await f.app.engine.stop(); f.app.store.tasks = originalTasks;
+  }
+});
+
 test('共享结果仍受本地令牌保护，读取中切账号不会发布或保存旧结果', async t => {
   const f = await fixture(t), block = f.hold('gpuCatalog');
   const batch = await f.batch(GPU_ROUTE, Array.from({ length: 5 }, () => ({})), block);
