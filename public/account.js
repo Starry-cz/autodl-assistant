@@ -114,7 +114,8 @@ function renderAccount() {
   wf.elements.token.required=!wallet.configured;
   wf.elements.token.placeholder=wallet.configured?'已配置，留空保留；填写可替换':'从 AutoDL 控制台 · 设置获取';
   $('#wallet-key-status').textContent=(wallet.configured?(wallet.rememberToken?'已配置 · 已加密记住':'已配置 · 仅本次服务使用'):'尚未配置')+(storage?' · '+storage.method:'');
-  if(storage){for(const form of [wf,$('#settings-form')]){const field=form.elements.rememberToken||form.elements.rememberCredentials;field.disabled=!storage.available;if(!storage.available)field.checked=false;}}
+  // 通知表单独立管理发送/保存期间的锁定；账号心跳仅更新钱包的存储选项。
+  if(storage){const field=wf.elements.rememberToken;field.disabled=!storage.available;if(!storage.available)field.checked=false;}
   $('#refresh-wallet').disabled=!!accountBusy||!wallet.configured;$('#clear-wallet').disabled=!!accountBusy||!wallet.configured;
   $('#check-budget').disabled=!!accountBusy||!wallet.configured||!currentQuote();
   $('#check-budget').title=!wallet.configured?'请先连接余额 Token':!currentQuote()?'暂无完整报价，可先启用监测；找到资源后自动核对余额':'';

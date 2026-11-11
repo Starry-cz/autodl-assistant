@@ -103,12 +103,17 @@ try {
   pass('保存后凭据掩码回填，两个渠道可分别测试');
 
   const heldResponse = page.waitForResponse(response => response.url() === base + '/api/notifications/test' && response.request().method() === 'POST');
+  // 断言失败时仍由 finally 关闭浏览器，不能让未完成的回执等待掩盖原始错误。
+  heldResponse.catch(() => {});
   await button('webhook').click(); await entered.promise;
   assert.match(await button('webhook').textContent(), /发送中/);
   assert.equal(await button('webhook').isDisabled(), true);
   assert.equal(await button('wechat').isDisabled(), true);
   assert.equal(await save.isDisabled(), true);
   assert.equal(report.requests.length, 1);
+  // 心跳会依次刷新通知表单与账号模块；后者不能重新解锁尚在发送的凭据选项。
+  await page.evaluate(() => refresh());
+  assert.equal(await field('rememberCredentials').isDisabled(), true, '发送期间心跳不能解锁记住凭据选项');
   released.resolve();
   assert.equal((await heldResponse).status(), 200);
   await page.waitForFunction(() => /成功|已接受/.test(document.querySelector('#webhook-test-status').textContent));
@@ -218,6 +223,21 @@ try {
   assert.deepEqual(report.externalRequests, []);
   assert.deepEqual(report.browserErrors, []);
   pass('桌面与窄屏无溢出，未生成任务/通知队列，未保存明文凭据或外部调用');
+
+  // 模拟没有系统加密存储的环境；编辑其他字段也不能重新启用不支持的记住选项。
+  await page.route(base + '/api/state', async route => {
+    const response = await route.fetch(), state = await response.json();
+    state.credentialStorage.available = false;
+    state.settings.rememberCredentials = true;
+    await route.fulfill({ response, json: state });
+  });
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector('#connection').textContent === '已连接');
+  await goView(page, 'settings');
+  await field('webhookUrl').fill('https://draft.example.test/unavailable-storage');
+  assert.equal(await field('rememberCredentials').isDisabled(), true, '加密存储不可用时不能记住凭据');
+  assert.equal(await field('rememberCredentials').isChecked(), false);
+  pass('加密存储不可用时，编辑表单仍保持记住凭据选项关闭且禁用');
   report.status = 'passed';
 } catch (error) {
   report.status = 'failed'; report.error = String(error.stack || error); throw error;

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AutoDLBrowserAdapter } from '../src/adapters/autodl.mjs';
 import { testConfig } from './fixtures/config.mjs';
+import { fixture } from './helpers.mjs';
 // 仅内存中的合成实例列表；实例ID、主机号及配置不指向真实账号。
 const makeTask=(overrides={})=>({config:testConfig({gpuModel:'RTX 4090',mode:'clone',sourceId:'synthetic-source',action:'execute',paidConsent:true,...overrides}),operation:{stage:'accepted',at:Date.now(),quote:{host:{number:'合成922机'}},baselineIds:['synthetic-existing'],receipt:{acceptedAt:Date.now(),instanceId:null}}});
 const instance=patch=>({id:'synthetic-newtarget',region:'北京B区',gpuModel:'RTX 4090',gpuCount:1,hostNumber:'合成922机',running:true,...patch});
@@ -77,11 +78,56 @@ test('读取可解析的合成列表并保留实例身份', async () => {
   assert.equal(result.instances[0].gpuModel,'RTX 4090');
   assert.equal(result.instances[0].gpuCount,1);
 });
-test('实例分页基线收集所有页面并按ID去重', async () => {
+test('实例分页基线收集互不重叠的所有页面', async () => {
   const a = adapter();
-  a.page = listPage([{texts:[listText('synthetic-first01')]}, {texts:[listText('synthetic-first01'),listText('synthetic-second1')]}]);
+  a.page = listPage([{texts:[listText('synthetic-first01')]}, {texts:[listText('synthetic-second1')]}]);
   a.settle = async () => {}; a.checkPage = async () => {};
   assert.deepEqual((await a.scanInstances()).map(i => i.id), ['synthetic-first01','synthetic-second1']);
+});
+
+// 新实例插入首页会把旧行推到下一页；跨页重复意味着快照发生变化，不能靠去重声称读全。
+for (const shifted of ['重复旧行', '后续空页']) test(`提交结果不明时遇到${shifted}，保留点击记录且不再次下单`, async t => {
+  const a = adapter(), f = fixture(t, {}, { adapter: a });
+  const first = 'synthetic-first01', second = 'synthetic-second1', third = 'synthetic-third01';
+  a.goto = async () => { a.page = listPage([
+    { texts: [listText(first), listText(second)] },
+    shifted === '重复旧行' ? { texts: [listText(second), listText(third)] } : { texts: [], empty: ['暂无数据'] },
+  ]); };
+  a.settle = async () => {}; a.checkPage = async () => {}; a.rejectRecheckMs = 0;
+  const operation = { id: 'synthetic-pagination-operation', stage: 'click_started',
+    at: f.clock() - 180000, clickedAt: f.clock() - 180000,
+    quote: { host: { number: '922机', region: '北京B区' } }, baselineIds: [first, second, third] };
+  f.store.patch(f.task, { state: 'verifying', operation });
+  a.probe = async () => assert.fail('分页快照未确认完整，不能重新进入租用');
+  await f.engine.tick();
+  assert.equal(f.task.operation?.id, operation.id);
+  assert.equal(f.task.state, 'verifying');
+  assert.equal(f.submissions, 0);
+  await f.due(30001);
+  assert.equal(f.task.operation?.id, operation.id);
+  assert.equal(f.task.state, 'verifying');
+  assert.equal(f.submissions, 0);
+  // 后续完整快照中出现唯一目标时，恢复正常绑定而不是永久阻断任务。
+  a.goto = async () => { a.page = listPage([
+    { texts: [listText('synthetic-newtarget'), listText(first)] },
+    { texts: [listText(second), listText(third)] },
+  ]); };
+  await f.due(30001);
+  assert.equal(f.task.state, 'completed');
+  assert.equal(f.task.operation?.id, operation.id);
+  assert.equal(f.task.operation.receipt.instanceId, 'synthetic-newtarget');
+  assert.equal(f.submissions, 0);
+});
+
+test('平台报拒绝后跨页重复，不能把不完整列表认作未创建', async () => {
+  const a = adapter(), t = makeTask();
+  const first = 'synthetic-first01', second = 'synthetic-second1';
+  a.goto = async () => { a.page = listPage([
+    { texts: [listText(first)] }, { texts: [listText(first), listText(second)] },
+  ]); };
+  a.settle = async () => {}; a.checkPage = async () => {}; a.rejectRecheckMs = 0;
+  await assert.rejects(a.confirmNotCreated(t, { baselineIds: [first, second] }, '合成平台拒绝'),
+    error => error.code === 'LIST_CHANGED' && error.retryable === true && !error.notCreated);
 });
 
 test('实例读取复用导航时的第一页等待，后续每页仍等待并核验登录', async () => {

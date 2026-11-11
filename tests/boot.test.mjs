@@ -131,11 +131,46 @@ test('确认前暂停阻止点击，确认后取消保留提交回执', async t 
   assert.equal(g.task.state, 'cancelled'); assert.ok(g.task.operation.receipt);
 });
 
-test('等待时限停止提交；已提交超时保留记录待核对', async t => {
+test('等待时限停止提交；已提交在独立核对时限结束后保留记录待处理', async t => {
   const f = bootFixture(t, { timeoutMinutes: 1 }); f.adapter.current = source({ gpuAvailable: false });
   await f.engine.tick(); await f.due(60001); assert.equal(f.task.state, 'expired'); assert.equal(f.adapter.boots, 0);
-  const g = bootFixture(t, { timeoutMinutes: 1 }); await g.engine.tick(); await g.due(60001);
+  const g = bootFixture(t, { timeoutMinutes: 1 }); await g.engine.tick(); await g.due(30 * 60000);
   assert.equal(g.task.state, 'attention'); assert.ok(g.task.operation); assert.equal(g.adapter.boots, 1);
+});
+
+test('开机在等待截止前提交，截止后仍读取原实例并确认运行，不重复开机', async t => {
+  const f = bootFixture(t, { timeoutMinutes: 1 });
+  f.advance(55000); await f.engine.tick();
+  assert.equal(f.adapter.boots, 1);
+  f.adapter.current = source({ stopped: false, running: true });
+  await f.due(f.task.nextCheckAt - f.clock());
+  assert.equal(f.task.state, 'completed');
+  assert.equal(f.task.result.gpuVerified, true);
+  assert.equal(f.adapter.boots, 1);
+});
+
+test('恢复已提交开机任务后给予独立核对时限，不被原监测分钟数提前截断', async t => {
+  const f = bootFixture(t, { timeoutMinutes: 1 });
+  await f.engine.tick();
+  f.engine.control(f.task, 'pause'); f.advance(35 * 60000);
+  f.engine.control(f.task, 'resume');
+  const resumed = f.clock(), operationId = f.task.operation.id;
+  await f.due(60001);
+  assert.equal(f.task.state, 'verifying');
+  assert.equal(f.task.operation.id, operationId);
+  await f.due(resumed + 30 * 60000 - f.clock());
+  assert.equal(f.task.state, 'attention');
+  assert.equal(f.task.operation.id, operationId);
+  assert.equal(f.adapter.boots, 1);
+});
+
+test('开机准备期间越过等待时限，无付费点击时应标记已到期', async t => {
+  const f = bootFixture(t, { timeoutMinutes: 1 });
+  f.adapter.boot = async (_task, mark) => { f.advance(60001); mark(); f.adapter.boots++; return {}; };
+  await f.engine.tick();
+  assert.equal(f.task.state, 'expired');
+  assert.equal(f.task.operation, null);
+  assert.equal(f.adapter.boots, 0);
 });
 
 test('原实例任务按ID去重，同型号不同实例不互相阻挡', async t => {

@@ -14,14 +14,14 @@
 | [4. 单文件在线安装](#method-4) | 本机浏览器网页 | 不需要，首次自动下载 | 希望只下载一个小文件 |
 | [5. 两条 PowerShell 命令](#method-5) | 本机浏览器网页 | 不需要，首次自动下载 | 希望用命令安装，或指定安装目录 |
 
-本文下载链接对应 **v2.0.0**。第 1、2 种自带运行环境；第 3、4、5 种首次运行需要联网下载 Node.js（如本机缺少）、依赖和浏览器组件。它们不要求安装 Git。
+本文下载链接对应 **v2.0.1**。第 1、2 种自带运行环境；第 3、4、5 种首次运行需要联网下载 Node.js（如本机缺少）、依赖和浏览器组件。它们不要求安装 Git。
 
 **系统要求：**桌面包支持 Windows 10/11 x64；源码网页版提供 x64 / ARM64 环境下载路径。已在 Windows 10 x64 验证，未在 Windows 11 或 ARM64 实机验证；当前不提供 macOS、Linux 和 ARM64 桌面安装包。
 
 <a id="method-1"></a>
 ## 1. EXE 安装包：像普通软件一样安装（推荐）
 
-1. [下载 v2.0.0 桌面安装包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.0/autodl-assistant-desktop-2.0.0-setup-x64.exe)。文件名以 **setup-x64.exe** 结尾。
+1. [下载 v2.0.1 桌面安装包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.1/autodl-assistant-desktop-2.0.1-setup-x64.exe)。文件名以 **setup-x64.exe** 结尾。
 2. 下载完成后，双击这个 EXE。安装到当前 Windows 用户，不需要管理员权限，也不用安装 Node.js、npm 或浏览器环境。
 3. 安装完成后，打开桌面的 **AutoDL助手桌面版**。也可以从 Windows 开始菜单找到同名程序。
 4. 按下方[首次登录与使用](#first-use)连接 AutoDL，然后使用监控室或创建抢卡任务。
@@ -33,7 +33,7 @@
 <a id="method-2"></a>
 ## 2. 便携 ZIP：全部解压后直接运行
 
-1. [下载 v2.0.0 完整便携包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.0/autodl-assistant-desktop-2.0.0-win-x64.zip)。文件名以 **win-x64.zip** 结尾。
+1. [下载 v2.0.1 完整便携包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.1/autodl-assistant-desktop-2.0.1-win-x64.zip)。文件名以 **win-x64.zip** 结尾。
 2. 右键 ZIP，选择 **全部解压**，放到自己有写入权限的固定文件夹，例如 `D:\AutoDL桌面版`（有 D 盘时）。
 3. 打开解压后的文件夹，双击 **AutoDL Assistant.exe**。这是完整桌面程序，不需要先安装 Node.js 或运行任何 CMD。
 4. 按下方[首次登录与使用](#first-use)完成登录。
@@ -47,7 +47,7 @@
 <a id="method-3"></a>
 ## 3. 源码网页版：下载源码，双击启动
 
-1. [下载 v2.0.0 完整源码包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.0/autodl-assistant-v2.0.0.zip)。如果希望取得尚未发布的修改，也可在仓库主页选择 **Code → Download ZIP** 下载 `main` 分支；`main` 会持续变化，与固定版本包可能不同。
+1. [下载 v2.0.1 完整源码包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.1/autodl-assistant-v2.0.1.zip)。如果希望取得尚未发布的修改，也可在仓库主页选择 **Code → Download ZIP** 下载 `main` 分支；`main` 会持续变化，与固定版本包可能不同。
 2. 右键 ZIP，选择 **全部解压**，放到有写入权限的固定目录，例如 `D:\AutoDL助手`。不要在 ZIP 内运行。
 3. 进入项目目录，确认同一层能看到 **package.json、public、src、scripts、启动抢卡助手.cmd**。若只看到一个项目文件夹，继续打开这一层。
 4. 双击 **启动抢卡助手.cmd**。首次会依次准备运行环境、安装依赖、检查浏览器，再启动后台。保持联网并等待“启动成功”，不要在下载途中关闭窗口。
@@ -62,7 +62,7 @@
 <a id="method-4"></a>
 ## 4. 单文件在线安装：只下载一个 CMD
 
-1. [下载 v2.0.0 在线安装启动器](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.0/autodl-assistant-setup.cmd)。这是一个小的安装引导文件，**不是离线安装包**。
+1. [下载 v2.0.1 在线安装启动器](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.1/autodl-assistant-setup.cmd)。这是一个小的安装引导文件，**不是离线安装包**。
 2. 双击 **autodl-assistant-setup.cmd**，保持联网。它会下载完整源码，再自动准备环境并启动网页版。
 3. 默认安装位置是 `%LOCALAPPDATA%\AutoDL-Assistant`。可将这个路径粘贴到资源管理器地址栏查看。
 4. 等待“安装和启动完成”。浏览器会打开 [http://127.0.0.1:8787](http://127.0.0.1:8787)，随后按[首次登录与使用](#first-use)连接账号。
@@ -82,7 +82,7 @@
 2. 先粘贴下面第一条命令，按回车，等待下载结束：
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Starry-cz/autodl-assistant/v2.0.0/install.ps1" -OutFile "$env:TEMP\install-autodl.ps1"
+Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Starry-cz/autodl-assistant/v2.0.1/install.ps1" -OutFile "$env:TEMP\install-autodl.ps1"
 ```
 
 3. 再粘贴下面第二条命令，按回车，等待安装和启动完成：

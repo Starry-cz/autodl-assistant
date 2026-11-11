@@ -206,6 +206,49 @@ test('长资料只把与运行条件相关的行发给模型', async () => {
   const sent = planModelText(text);
   assert.ok(sent.length < 1000); assert.match(sent, /requires 24GB VRAM/); assert.match(sent, /## Hardware/);
 });
+
+test('环境规划先脱敏再裁剪资料，不向模型发送被截断的 Key 片段', async t => {
+  const key = 'synthetic-custom-credential-' + 'x'.repeat(96);
+  let sent;
+  const f = setup(t, { fetchImpl: async (_url, options) => {
+    sent = JSON.parse(options.body).messages[1].content;
+    return response({ items: [], summary: '' });
+  } });
+  enable(f.ai, { apiKey: key });
+  // 原始行会在 400 字符处裁剪，Key 故意跨越该位置；其余资料使摘录路径生效。
+  const line = 'CUDA ' + '.'.repeat(370) + key;
+  await f.ai.extract({ projectText: line + '\n' + 'unrelated text\n'.repeat(250) });
+  assert.equal(sent.includes(key.slice(0, 20)), false);
+  assert.match(sent, /已隐藏Key/);
+});
+
+test('环境规划的摘要与被拒条目均先脱敏再限长，不回显完整或部分 Key', async t => {
+  const key = 'synthetic-custom-credential-' + 'y'.repeat(96);
+  const f = setup(t, { fetchImpl: async () => response({
+    summary: '说明'.repeat(140) + key,
+    items: [{ field: 'unknown', value: key, evidence: key }],
+  }) });
+  enable(f.ai, { apiKey: key });
+  const out = await f.ai.extract({ projectText: PLAN_SOURCE });
+  assert.equal(JSON.stringify(out).includes(key.slice(0, 16)), false);
+  assert.equal(out.rejected.length, 1);
+  assert.match(out.summary, /已隐藏Key/);
+  assert.match(out.rejected[0].value, /已隐藏Key/);
+});
+
+test('模型将规划字段返回为数组时，按下游转换方式脱敏后再显示拒绝原因', async t => {
+  const key = 'synthetic-array-credential-' + 'z'.repeat(96);
+  const f = setup(t, { fetchImpl: async () => response({ summary: '', items: [
+    { field: [key], value: [key], evidence: [key] },
+    { field: 'vramGB', value: 28, evidence: PLAN_SOURCE.split('\n')[0] },
+  ] }) });
+  enable(f.ai, { apiKey: key });
+  const out = await f.ai.extract({ projectText: PLAN_SOURCE });
+  assert.equal(JSON.stringify(out).includes(key.slice(0, 20)), false);
+  assert.equal(out.rejected.length, 1);
+  assert.match(out.rejected[0].value, /已隐藏Key/);
+  assert.equal(out.accepted[0].value, 28, '正常数值字段仍可解析');
+});
 test('上游错误给出可操作的说明：余额不足、欠费、免费额度用完、模型不支持关闭思考；不泄露 Key、不自动重试', async t => {
   const f = setup(t); enable(f.ai);
   const body = (code, message) => JSON.stringify({ error: { code, message: message + ' ' + SECRET } });

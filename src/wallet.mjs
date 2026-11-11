@@ -122,7 +122,7 @@ export class Wallet {
     if (this.clock() - snapshot.checkedAt > MAX_AGE || this.lastError) fail('BALANCE_STALE', '余额已过期或查询失败，请重新同步', { status: 409 });
     const availableMilli = Math.round(snapshot.balance * 1000) + (config.includeVouchers ? Math.round(snapshot.vouchers * 1000) : 0);
     if (!Number.isSafeInteger(availableMilli)) fail('BALANCE_SCHEMA', '可用金额超出可核实范围', { status: 409 });
-    const result = { ...budget, available: availableMilli / 1000, includeVouchers: config.includeVouchers === true,
+    const result = { ...budget, gpuCount: config.gpuCount, available: availableMilli / 1000, includeVouchers: config.includeVouchers === true,
       checkedAt: snapshot.checkedAt, credentialRevision: this.#generation, sufficient: availableMilli >= budget.requiredMilli };
     if (!result.sufficient) fail('BALANCE_INSUFFICIENT', '可用余额 ¥' + result.available.toFixed(3) + '，低于本次预检所需 ¥'
       + budget.required.toFixed(3) + '；请充值或调整运行时长、预算及保留余额', { status: 409 });
@@ -137,6 +137,9 @@ export class Wallet {
       fail('BALANCE_STALE', '提交前余额已失效或凭证已变更，未点击付费按钮', { status: 409 });
     const available = Math.round(this.snapshot.balance * 1000) + (check.includeVouchers ? Math.round(this.snapshot.vouchers * 1000) : 0);
     if (available < check.requiredMilli) fail('BALANCE_INSUFFICIENT', '余额检查后可用金额下降，已停止提交', { status: 409 });
+    // 预检之后也可能刷新到账户扣费；多卡现金下限与总预算必须在点击前同时成立。
+    if (check.gpuCount > 1 && Math.round(this.snapshot.balance * 1000) < MULTI_CARD_MIN_MILLI)
+      fail('BALANCE_INSUFFICIENT', '余额检查后钱包余额下降；租用多卡实例时现金余额需大于 10 元，已停止提交', { status: 409 });
   }
   // 监测期间的余额提醒用：不超过 maxAge 的快照直接返回，否则刷新。付费前的判断仍用 check()。
   async recentBalance(maxAge = 300000) {

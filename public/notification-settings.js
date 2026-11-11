@@ -18,7 +18,8 @@
     savedRevision = revision; conflicted = false;
     for (const name of fields) {
       const field = form.elements[name];
-      if (field.type === 'checkbox') field.checked = name === 'rememberCredentials' ? settings[name] !== false : settings[name] === true;
+      if (field.type === 'checkbox') field.checked = name === 'rememberCredentials'
+        ? settings[name] !== false && appState.credentialStorage?.available !== false : settings[name] === true;
       else field.value = settings[name] || '';
     }
     savedSignature = JSON.stringify(values());
@@ -26,7 +27,9 @@
   function render() {
     const changed = dirty(), loading = savedSignature === null;
     form.setAttribute('aria-busy', String(!!busy));
-    for (const name of fields) form.elements[name].disabled = !!busy || loading;
+    // 存储能力与请求锁统一由此管理，避免账号心跳或编辑其他字段时错误解锁。
+    for (const name of fields) form.elements[name].disabled = !!busy || loading
+      || (name === 'rememberCredentials' && appState.credentialStorage?.available === false);
     saveButton.disabled = !!busy || loading || conflicted;
     saveButton.textContent = busy === 'save' ? '保存中…' : '保存通知设置';
     reloadButton.hidden = !conflicted;

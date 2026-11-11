@@ -65,3 +65,18 @@ test('多卡预算不低于“单卡价 × 卡数”；租多卡时钱包余额�
   assert.equal((await w.check(cfg({ gpuCount: 1, includeVouchers: true }), { hourly: 1, storageDaily: 0 })).sufficient, true); w.close();
 });
 
+test('多卡提交前余额下降时，代金券或低预算不能绕过现金余额下限', async () => {
+  let assets = 12000;
+  const w = fixture({ fetchImpl: async () => response(assets, 100000) });
+  try {
+    const check = await w.check(cfg({ gpuCount: 2, includeVouchers: true, expectedHours: 1 }), { hourly: 2, storageDaily: 0 });
+    // 预检通过后，另一次余额刷新读到现金下降；即便总余额仍覆盖预算也必须阻止提交。
+    assets = 10000;
+    await w.refresh({ force: true });
+    assert.throws(() => w.confirm(check), error => error.code === 'BALANCE_INSUFFICIENT' && /大于 10 元/.test(error.message));
+    assets = 10001;
+    await w.refresh({ force: true });
+    assert.doesNotThrow(() => w.confirm(check));
+  } finally { w.close(); }
+});
+

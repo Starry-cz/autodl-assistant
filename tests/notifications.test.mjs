@@ -223,3 +223,55 @@ test('测试收到响应头后正文挂起也受超时约束，失败后释放�
   assert.equal(notifier.busy, false); assert.deepEqual(f.store.data.notifications, []);
 });
 
+test('发送前写盘失败不能耗尽任务通知重试次数，恢复后仍可投递', async t => {
+  for (const channel of ['webhook', 'wechat']) {
+    const f = fixture(t); queue(f); let calls = 0;
+    f.store.data.settings = { [`${channel}Enabled`]: true, webhookUrl: 'https://synthetic.example.test/notify', wechatToken: 'synthetic-only' };
+    const notifier = new Notifier(f.store, { clock: f.clock, fetchImpl: async () => { calls++; return success(); } });
+    const save = f.store.save.bind(f.store);
+    // 连续模拟写盘暂时失败；每次都发生在真正发送之前，不能消耗发送重试预算。
+    f.store.save = () => { throw Error('synthetic write temporarily unavailable'); };
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await assert.rejects(notifier.flush(), /temporarily unavailable/);
+      f.advance(301000);
+    }
+    assert.equal(calls, 0);
+    f.store.save = save;
+    await notifier.flush();
+    assert.equal(calls, 1, channel + ' 写盘恢复后应真正发送');
+    assert.equal(f.store.data.notifications[0].deliveries[channel].attempts, 1);
+    assert.equal(f.store.data.notifications[0].deliveries[channel].ok, true);
+  }
+});
+
+test('测试通知写盘失败不占用微信最后一个额度或 Webhook 冷却', async t => {
+  for (const channel of ['webhook', 'wechat']) {
+    const f = fixture(t); let calls = 0;
+    f.store.data.settings = { [`${channel}Enabled`]: true, webhookUrl: 'https://synthetic.example.test/notify', wechatToken: 'synthetic-only' };
+    f.store.data.deliveryState = { wechatAttempts: Array(49).fill(f.clock() - 1000) };
+    const before = structuredClone(f.store.data.deliveryState), save = f.store.save.bind(f.store);
+    const notifier = new Notifier(f.store, { clock: f.clock, fetchImpl: async () => { calls++; return success(); } });
+    f.store.save = () => { throw Error('synthetic write temporarily unavailable'); };
+    await assert.rejects(notifier.test(channel), /temporarily unavailable/);
+    assert.equal(calls, 0); assert.equal(notifier.busy, false);
+    assert.deepEqual(f.store.data.deliveryState, before);
+    f.store.save = save;
+    assert.equal((await notifier.test(channel)).success, true);
+    assert.equal(calls, 1);
+  }
+});
+
+test('真实请求已发送后写盘失败，不能回滚已占用次数或再次发送成功消息', async t => {
+  const f = fixture(t); queue(f); let calls = 0, saves = 0;
+  f.store.data.settings = { wechatEnabled: true, wechatToken: 'synthetic-only' };
+  const save = f.store.save.bind(f.store);
+  f.store.save = () => { if (++saves === 2) throw Error('synthetic receipt save failed'); return save(); };
+  const notifier = new Notifier(f.store, { clock: f.clock, fetchImpl: async () => { calls++; return success(); } });
+  await assert.rejects(notifier.flush(), /receipt save failed/);
+  assert.equal(calls, 1); assert.equal(f.store.data.deliveryState.wechatAttempts.length, 1);
+  assert.equal(f.store.data.notifications[0].deliveries.wechat.attempts, 1);
+  assert.equal(f.store.data.notifications[0].deliveries.wechat.ok, true);
+  f.store.save = save; f.advance(301000); await notifier.flush();
+  assert.equal(calls, 1);
+});
+

@@ -355,8 +355,10 @@ export class Engine {
   // 开机始终绑定原实例。与新租用分开执行，不进入主机筛选、创建、克隆或关机路径。
   async stepBoot(t) {
     if (stopped(t) || this.stopping) return;
-    if (this.clock() >= t.deadlineAt || t.operation && this.clock() - verifySince(t) >= VERIFY_TIMEOUT) {
-      const message = t.operation ? '开机已提交，但等待时限内未确认运行；请在 AutoDL 核对原实例，本任务不会再次点击开机' : '等待时限已到，未继续开机';
+    // 等待时限只限制新点击；已落盘原实例回执后，与新租/克隆一样独立核对 30 分钟，绝不再次开机。
+    const submitted = t.operation?.receipt?.instanceId === t.config.sourceId;
+    if (submitted ? this.clock() - verifySince(t) >= VERIFY_TIMEOUT : this.clock() >= t.deadlineAt) {
+      const message = t.operation ? '开机已提交，但核对时限内未确认运行；请在 AutoDL 核对原实例，本任务不会再次点击开机' : '等待时限已到，未继续开机';
       this.store.patch(t, { state: t.operation ? 'attention' : 'expired', lastError: t.operation ? message : null });
       this.store.log(t, 'warn', message); this.alert(t, 'boot-timeout', message); return;
     }
@@ -409,6 +411,11 @@ export class Engine {
     } catch (error) {
       if (t.operation?.stage === 'intent') this.store.patch(t, { operation: null });
       if (stopped(t) || this.stopping) return;
+      // 进入确认弹窗后才到期仍属于正常结束，没有点击时不误报为需要人工处理。
+      if (error.code === 'BOOT_DEADLINE' && !t.operation) {
+        this.store.patch(t, { state: 'expired', lastError: null });
+        this.store.log(t, 'info', error.message); this.alert(t, 'boot-timeout', '等待时限已到，未继续开机'); return;
+      }
       const message = redact(messageOf(error));
       // 只有本次点击明确收到“缺卡”才允许再提交；传输错误或未知弹窗都保留提交记录。
       const verifying = !!t.operation && !['BOOT_SOURCE', 'BOOT_MISMATCH', 'LOGIN_REQUIRED', 'HUMAN_REQUIRED', 'LOGIN_CHECK_REQUIRED'].includes(error.code);

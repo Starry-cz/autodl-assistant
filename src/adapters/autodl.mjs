@@ -449,11 +449,14 @@ export class AutoDLBrowserAdapter {
     for (let turn = 0; turn < 100; turn++) {
       if (turn || !settled) { await this.settle(); await this.checkPage(); }
       const { texts, instances } = await this.readInstancePage(expectedModel);
+      // 翻页期间新增/删除实例会推动旧行跨页或让末页变空；此时不能把去重后的部分列表用作提交基线或“未创建”证据。
+      if (turn && !instances.length) fail('LIST_CHANGED', '实例分页在读取期间变空，尚未确认完整列表，请稍后重新读取', LIMITED_RETRY);
       // 同一页重复的主键无法唯一定位，停止对账，不把不完整列表当作“未创建”。
       const page = new Map();
       for (const info of instances) {
         const other = page.get(info.id);
         if (other) fail('DOM_CHANGED', '实例列表中有两行使用同一实例 ID“' + info.id + '”，请核对页面后重试');
+        if (rows.has(info.id)) fail('LIST_CHANGED', '实例分页在读取期间发生位移，尚未确认完整列表，请稍后重新读取', LIMITED_RETRY);
         page.set(info.id, info);
       }
       for (const info of instances) rows.set(info.id, info);

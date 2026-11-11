@@ -86,6 +86,7 @@ export class Notifier {
     if (channel === 'wechat' && !settings.wechatToken) fail('CONFIG', '请先填写 AutoDL 开发者 Token 并保存设置');
     const current = () => settings === this.store.data.settings && isCurrent();
     if (!current()) fail('NOTIFICATION_CONTEXT_CHANGED', '账号或通知设置已变化，请重新确认后测试', { status: 409 });
+    const previousLimit = structuredClone(this.store.data.deliveryState);
     const now = this.clock(), limit = this.store.data.deliveryState ||= {};
     const wait = channel === 'wechat' ? this.reserveWechat(now) : Math.max(0, Math.ceil(((limit.testWebhookNextAt || 0) - now) / 1000));
     if (wait) fail('NOTIFICATION_RATE_LIMIT', channel === 'wechat'
@@ -94,7 +95,9 @@ export class Notifier {
     if (channel === 'webhook') limit.testWebhookNextAt = now + 10000;
     this.busy = true;
     try {
-      this.store.save();
+      // 此时尚未外发；写盘失败不能消耗冷却或微信额度，否则修复存储后仍无法测试。
+      try { this.store.save(); }
+      catch (error) { this.store.data.deliveryState = previousLimit; throw error; }
       // 测试只发送一次，不创建任务、不进入自动重试队列，超时后由用户核对收信。
       const id = randomUUID(), n = { id, key: 'notification-test:' + id, event: 'test', taskId: null, at: now,
         title: 'AutoDL 助手测试通知', name: '通知渠道测试', message: '这是一条测试通知。收到此消息说明当前通知渠道可以接收提醒；本次测试不会创建或启动实例。' };
@@ -123,17 +126,27 @@ export class Notifier {
         for (const channel of CHANNELS) {
           // 退出只等待当前渠道回执落盘，未发送的渠道留给下次启动，避免退出期间又发起请求。
           if(this.stopping || settings!==this.store.data.settings || !this.canDeliver(n))break;
-          const previous = n.deliveries[channel] || {};
+          const previousDelivery = n.deliveries[channel], previous = previousDelivery || {};
           const attempts = previous.attempts ?? (previous.ok === false ? n.attempts || 0 : 0);
           const now = this.clock();
           if (!settings[`${channel}Enabled`] || previous.ok || attempts >= 5 || (previous.nextAttemptAt || 0) > now) continue;
+          const previousLimit = structuredClone(this.store.data.deliveryState);
           if (channel === 'wechat' && this.reserveWechat(now)) continue;
+          const previousAttempts = n.attempts, previousNextAt = n.nextAttemptAt;
           const delivery = { ok: false, attempts: attempts + 1, at: now,
             nextAttemptAt: now + Math.min(300000, 15000 * 2 ** attempts), pending: true };
           n.deliveries[channel] = delivery;
           n.attempts = (n.attempts || 0) + 1;
           n.nextAttemptAt = delivery.nextAttemptAt;
-          this.store.save(); // 发送前先持久化尝试与限速记录。
+          // 发送前先持久化。未发出请求时保存失败，需一起还原重试次数与共享限额。
+          try { this.store.save(); }
+          catch (error) {
+            if (previousDelivery) n.deliveries[channel] = previousDelivery;
+            else delete n.deliveries[channel];
+            n.attempts = previousAttempts; n.nextAttemptAt = previousNextAt;
+            this.store.data.deliveryState = previousLimit;
+            throw error;
+          }
           try {
             await this.send(channel, n, settings);
             Object.assign(delivery, { ok: true, at: this.clock(), pending: false });
