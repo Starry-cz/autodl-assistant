@@ -45,7 +45,7 @@
   }
 
   function chart(task, samples) {
-    if (!samples.length) return '<p class="task-monitor-empty">尚未采样。开始检查后显示实际读取结果，不补造历史。</p>';
+    if (!samples.length) return '<p class="task-monitor-empty">开始检查后显示采样。</p>';
     const boot = task.config.mode === 'boot', points = samples.map(sample => pointValue(sample, boot));
     const width = 640, height = 196, left = 56, right = 18, top = 24, bottom = 46;
     const maximum = boot ? 1 : Math.max(1, ...points.filter(Boolean).map(point => point.value));
@@ -77,7 +77,7 @@
     const samples = samplesOf(task), boot = task.config.mode === 'boot';
     return '<details class="task-monitor-history" data-monitor-history="' + esc(task.id) + '"><summary><span>最近 60 次采样</span><small>' + (samples.length ? '已记录 ' + samples.length + ' 次' : '未采样') + '</small></summary>'
       + '<div class="task-monitor-history-body">' + summary(task) + chart(task, samples)
-      + '<p class="task-sample-note">' + (boot ? '纵轴为 GPU 是否充足，不代表卡数。' : '实心点为完整读数；空心点仅为已读空卡，不代表全范围总量。不同扫描范围不连线。') + '未知或失败处断开。横向按检查顺序排列，可聚焦采样点查看时间与说明。</p></div></details>';
+      + '<p class="task-sample-note">' + (boot ? '纵轴：GPU 是否充足。' : '实心：完整读数；空心：部分读数。') + '悬停或聚焦采样点查看详情。</p></div></details>';
   }
 
   function tick() {

@@ -26,10 +26,10 @@
     $('#update-install').disabled=busy||installing;
     $('#update-install').textContent=installing?'正在更新…':installation.status==='error'?'重试更新':'更新并重启';
     $('#update-installation').hidden=!installation.message&&!installRequested;
-    $('#update-installation').textContent=reconnectTimedOut?'尚未确认新版启动，请查看本机更新日志或重新打开助手。原数据仍保留。':installation.message||(installRequested?'正在准备更新…':'');
+    $('#update-installation').textContent=reconnectTimedOut?'尚未确认新版启动，请重新打开助手或查看更新日志。数据已保留。':installation.message||(installRequested?'正在准备更新…':'');
     if(installing&&!reconnecting&&!reconnectTimedOut&&installation.targetVersion)void waitForNewBackend(installation.targetVersion);
     $('#version-updates .updates-panel').dataset.updateState=status;
-    const message={idle:'尚未检查，联网后会自动检查。',checking:'正在检查正式发布版本…',available:'发现新版本 '+version(data.latestVersion)+'，可下载更新。',current:'已是最新正式版本。',ahead:'当前版本高于公开发布版。',error:'检查失败 · '+(requestError||data.error||'请稍后重试。')}[status];
+    const message={idle:'尚未检查。',checking:'正在检查更新…',available:'发现新版本 '+version(data.latestVersion)+'。',current:'已是最新版本。',ahead:'当前版本高于公开发布版。',error:'检查失败 · '+(requestError||data.error||'请稍后重试。')}[status];
     // 普通状态轮询不重复改写 live region，避免读屏软件反复播报相同结果。
     const statusText=message||'尚未检查更新。';
     if($('#update-status').textContent!==statusText)$('#update-status').textContent=statusText;
@@ -45,7 +45,7 @@
     $('#update-release-link').href=data.releaseUrl||releaseHome;
     $('#update-release-link').textContent=available?'其他下载方式 ↗':'查看发布页 ↗';
     $('#update-guidance').hidden=!available;
-    $('#update-instructions').textContent='点击“更新并重启”，下载准备完成后自动切换新版。提交或结果核对期间暂不更新。登录仍有效时自动恢复连接；已暂停任务保持暂停。手动下载安装时请先退出旧程序。';
+    $('#update-instructions').textContent='任务提交或核对期间请稍后更新。手动安装前请完全退出程序。';
     $('#update-notes').hidden=!data.notes;
     // 发布说明一律作为文字显示，远端内容不能成为可执行 HTML。
     const notes=data.notes||'';
@@ -90,7 +90,7 @@
     // 保留本次等候超时，状态轮询不能再次启动同一轮等待或覆盖提示。
     reconnecting=false;reconnectTimedOut=true;
     $('#update-installation').hidden=false;
-    $('#update-installation').textContent='尚未确认新版启动，请查看本机更新日志或重新打开助手。原数据仍保留。';
+    $('#update-installation').textContent='尚未确认新版启动，请重新打开助手或查看更新日志。数据已保留。';
   }
   window.recoverUpdatedBackend=async error=>{
     if(reconnecting||error.status!==403||error.code!=='TOKEN')return;

@@ -11,6 +11,8 @@
   function status(node, message, state = 'neutral') {
     // 心跳只更新实际变化的文本，避免屏幕阅读器重复播报相同结果。
     if (node.textContent !== message) node.textContent = message;
+    // 可用按钮已表达操作；状态区仅在有进度、结果或阻塞原因时显示。
+    node.hidden = !message;
     node.dataset.state = state;
   }
   function hydrate(settings, revision) {
@@ -40,17 +42,17 @@
       const configured = savedSettings[channel + 'Enabled'] && (channel === 'webhook' ? savedSettings.webhookUrl : savedSettings.wechatToken);
       button.disabled = !!busy || changed || conflicted || !configured || loading;
       button.textContent = busy === channel ? '发送中…' : '发送测试通知';
-      if (busy === channel) status(node, '正在发送测试通知，请稍候…', 'pending');
-      else if (loading) status(node, '正在读取已保存配置…');
-      else if (conflicted) status(node, '通知配置已在其他页面修改，请先载入最新配置。');
-      else if (changed) status(node, '配置已修改，请先保存后再测试。');
+      if (busy === channel) status(node, '正在发送…', 'pending');
+      else if (loading) status(node, '正在读取配置…');
+      else if (conflicted) status(node, '配置已更新，请载入最新配置。');
+      else if (changed) status(node, '请先保存修改，再测试。');
       else if (results[channel]) status(node, results[channel].message, results[channel].state);
-      else status(node, configured ? '使用已保存配置，发送一条测试消息。' : '保存并启用此渠道后，即可测试。');
+      else status(node, configured ? '' : '启用并保存后可测试。');
     }
   }
   function conflict() {
     conflicted = true; results = {};
-    status(saveStatus, '其他页面已修改通知配置。载入最新配置会替换当前未保存输入。', 'error');
+    status(saveStatus, '配置已在其他页面修改。载入最新配置将替换未保存的内容。', 'error');
   }
   function sync(reset = false) {
     if (reset) {
@@ -61,13 +63,13 @@
       if (dirty()) conflict();
       else {
         results = {}; hydrate(appState.settings, appState.notificationSettingsRevision);
-        status(saveStatus, '已同步其他页面保存的配置。');
+        status(saveStatus, '已同步最新配置。');
       }
     }
     render();
   }
   function edited() {
-    results = {}; if (!conflicted) status(saveStatus, dirty() ? '有未保存的修改。' : ''); render();
+    results = {}; if (!conflicted) status(saveStatus, dirty() ? '修改尚未保存。' : ''); render();
   }
   form.addEventListener('input', edited);
   form.addEventListener('change', edited);
@@ -81,7 +83,7 @@
       if (generation !== current) return;
       appState.settings = response.settings; appState.notificationSettingsRevision = response.notificationSettingsRevision;
       hydrate(response.settings, response.notificationSettingsRevision); initialSettings = true;
-      status(saveStatus, '已保存，可以发送测试通知。', 'success');
+      status(saveStatus, '设置已保存。', 'success');
     } catch (error) {
       if (generation === current) {
         if (error.code === 'NOTIFICATION_SETTINGS_CHANGED') conflict();
@@ -97,7 +99,7 @@
       if (generation !== current) return;
       appState.settings = state.settings; appState.notificationSettingsRevision = state.notificationSettingsRevision;
       hydrate(state.settings, state.notificationSettingsRevision); results = {};
-      status(saveStatus, '已载入最新配置，可重新编辑或发送测试通知。', 'success');
+      status(saveStatus, '已载入最新配置。', 'success');
     } catch (error) {
       if (generation === current) status(saveStatus, '载入失败：' + error.message, 'error');
     } finally { busy = null; render(); }

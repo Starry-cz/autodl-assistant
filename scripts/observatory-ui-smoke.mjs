@@ -315,7 +315,7 @@ try {
   session = { state: 'expired', browserOpen: true, label: '合成会话已过期' };
   await page.evaluate(() => refresh());
   await view('overview');
-  assert.match(await page.locator('#overview-status').innerText(), /账号入口.*连接/);
+  assert.match(await page.locator('#overview-status').innerText(), /请先连接 AutoDL/);
   assert.equal(await page.locator('#overview-gpu-count').innerText(), '—');
   await view('billing');
   assert.match(await page.locator('#billing-status').innerText(), /账号入口.*连接|请先连接/);

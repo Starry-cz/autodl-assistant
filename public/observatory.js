@@ -22,29 +22,30 @@
   const go = view => document.querySelector('.nav-item[data-view="' + view + '"]').click();
   const official = '<a class="button small" href="https://www.autodl.com/console/instance/list" target="_blank" rel="noopener noreferrer">官网管理 ↗</a>';
   function statusText() {
-    if(!ready())return '点击账号入口连接 AutoDL，即可查看当前账号的实例。';
+    if(!ready())return '请先连接 AutoDL';
     if(pending)return pending === 'billing' ? '正在同步近 35 天账单…' : '正在同步实例、资源与余额…';
     const data = overview();
-    if(data?.error)return '部分数据未确认：' + data.error + '。请以各项数值和同步时间为准。';
-    if(!data?.checkedAt)return '点击同步读取账号数据。';
-    return (data.pagination.complete ? '实例已完整同步。' : '实例列表尚未完整：' + (data.pagination.reason || '分页未完成'))
-      + ' 资源是同步时的快照，关机实例可能没有运行指标。' + (data.walletError ? ' 余额未确认：' + data.walletError : '');
+    if(data?.error)return '部分数据未确认：' + data.error;
+    if(!data?.checkedAt)return '点击同步我的实例';
+    // 成功状态保持简短，缺页或余额错误仍明确显示。
+    return (data.pagination.complete ? '实例已同步' : '实例列表尚未完整：' + (data.pagination.reason || '分页未完成'))
+      + (data.walletError ? ' · 余额未确认：' + data.walletError : '');
   }
   function renderOverview() {
     const data = overview(), rows = data?.instances || [], target = rows.find(i => i.id === targetId);
     const stock = data?.stock?.instanceId === targetId ? data.stock : null;
     set('overview-status', statusText());set('overview-updated', when(data?.checkedAt));
     set('overview-gpu-count', number(stock?.idleGPUs));
-    set('overview-gpu-note', target ? (Number.isFinite(stock?.idleGPUs) ? '目标原主机空闲 GPU / 总计 ' + number(stock.totalGPUs) + ' 张' : stock?.reason || '目标原主机库存尚未读取') : '选择一个实例查看原主机库存');
+    set('overview-gpu-note', target ? (Number.isFinite(stock?.idleGPUs) ? '主机共 ' + number(stock.totalGPUs) + ' 张' : stock?.reason || '尚未读取主机库存') : '请选择监控实例');
     set('overview-target-count', target ? 1 : 0);
     set('overview-running-count', data?.checkedAt ? data.summary.running : '—');
-    html('overview-gpus', target ? '<div class="data-row"><div><strong>' + esc(target.gpuModel || '型号未知') + ' × ' + number(target.gpuCount) + '</strong><p>' + esc(target.region || '区域未知') + ' · ' + esc(target.machineId || '主机编号未知') + '</p></div><span class="badge neutral">' + esc(target.statusLabel) + '</span></div>' : empty('同步实例后，选择监控目标查看库存。'));
+    html('overview-gpus', target ? '<div class="data-row"><div><strong>' + esc(target.gpuModel || '型号未知') + ' × ' + number(target.gpuCount) + '</strong><p>' + esc(target.region || '区域未知') + ' · ' + esc(target.machineId || '主机编号未知') + '</p></div><span class="badge neutral">' + esc(target.statusLabel) + '</span></div>' : empty('请选择监控实例'));
     const watching = (appState.tasks || []).filter(t => t.config.mode === 'boot' && t.config.sourceId === targetId && t.config.action === 'execute' && active(t));
     const options = '<option value="">选择监控实例</option>' + rows.map(i => '<option value="' + esc(i.id) + '"' + (i.id === targetId ? ' selected' : '') + '>' + esc(i.name || i.id) + ' · ' + esc(i.gpuModel || '型号未知') + '</option>').join('');
-    html('overview-targets', '<div class="overview-target-picker"><label>监控目标<select id="overview-target-select" aria-label="监控目标">' + options + '</select></label><button type="button" class="button" data-configure-boot="' + esc(targetId) + '"' + (!target || !ready() ? ' disabled' : '') + '>配置自动开机</button></div><p class="hint">' + (watching.length ? '原实例开机任务：' + esc(watching.map(t => STATES[t.state] || t.state).join('、')) : '尚未启用自动开机；选择目标只读取数据。') + '</p>');
-    html('overview-resources', target ? resourceReadings(target) : empty('选择实例后查看 CPU、内存与磁盘余量。'));
+    html('overview-targets', '<div class="overview-target-picker"><label>监控目标<select id="overview-target-select" aria-label="监控目标">' + options + '</select></label><button type="button" class="button" data-configure-boot="' + esc(targetId) + '"' + (!target || !ready() ? ' disabled' : '') + '>配置自动开机</button></div><p class="hint">' + (watching.length ? '开机任务：' + esc(watching.map(t => STATES[t.state] || t.state).join('、')) : '自动开机未启用') + '</p>');
+    html('overview-resources', target ? resourceReadings(target) : empty('请选择监控实例'));
     const activity = (appState.notifications || []).slice(0, 6);
-    html('overview-activity', activity.length ? activity.map(n => '<article class="activity-row"><div><h3>' + esc(n.name) + '</h3><p>' + esc(n.message) + '</p></div><time>' + when(n.at) + '</time></article>').join('') : empty('暂无任务动态。资源命中或状态变化时会出现在这里。'));
+    html('overview-activity', activity.length ? activity.map(n => '<article class="activity-row"><div><h3>' + esc(n.name) + '</h3><p>' + esc(n.message) + '</p></div><time>' + when(n.at) + '</time></article>').join('') : empty('暂无任务动态'));
     for(const id of ['overview-refresh','fleet-refresh','billing-refresh'])document.getElementById(id).disabled = !!pending || !!appState.browser?.busy;
   }
   function resourceReadings(instance) {
@@ -58,7 +59,7 @@
       + gauge('剩余内存', remaining(instance.memoryGiB, usage.memoryUsedGiB), instance.memoryGiB, '总计 ' + number(instance.memoryGiB, ' GiB') + ' · 已用 ' + number(usage.memoryUsedGiB, ' GiB'), ' GiB')
       + gauge('系统盘剩余', remaining(instance.systemDiskGiB, usage.systemDiskUsedGiB), instance.systemDiskGiB, '总计 ' + number(instance.systemDiskGiB, ' GiB') + ' · 已用 ' + number(usage.systemDiskUsedGiB, ' GiB'), ' GiB')
       + gauge('数据盘剩余', remaining(instance.dataDiskGiB, usage.dataDiskUsedGiB), instance.dataDiskGiB, '总计 ' + number(instance.dataDiskGiB, ' GiB') + ' · 已用 ' + number(usage.dataDiskUsedGiB, ' GiB'), ' GiB')
-      + '</div><p class="hint">' + esc(instance.statusLabel) + ' · ' + when(overview()?.checkedAt) + '（北京时间）。指标未提供时保留未知，不按 0 处理。</p>';
+      + '</div><p class="hint">' + esc(instance.statusLabel) + ' · ' + when(overview()?.checkedAt) + '（北京时间）</p>';
   }
   function renderFleet() {
     const data = overview(), all = data?.instances || [], query = $('#fleet-search').value.trim().toLowerCase(), filter = $('#fleet-status').value;
@@ -106,14 +107,14 @@
     const data = bills(), wallet = overview()?.wallet;
     set('billing-updated', when(data?.checkedAt));
     set('billing-balance', moneyMilli(wallet?.balanceMilli));set('billing-voucher', moneyMilli(wallet?.vouchersMilli));set('billing-blocked', moneyMilli(wallet?.blockedMilli));
-    set('billing-status', !ready() ? '请先连接 AutoDL 并检查登录状态，再同步账单。' : pending === 'billing' ? '正在读取近 35 天账单与余额…' : data?.error ? (data.complete === false ? '账单仍有未确认数据：' : '同步失败，保留上次结果：') + data.error : data?.checkedAt ? '按北京时间的入账日统计，消费减去退款；充值不算消费。' : '点击“同步账单”读取近 35 天记录。');
+    set('billing-status', !ready() ? '请先连接 AutoDL' : pending === 'billing' ? '正在同步账单…' : data?.error ? (data.complete === false ? '账单仍有未确认数据：' : '同步失败，保留上次结果：') + data.error : data?.checkedAt ? '净消费 = 消费 − 退款' : '点击同步账单');
     const daily = [...(data?.daily || [])].sort((a,b) => a.date.localeCompare(b.date));
     const last = daily.at(-1)?.date || '', month = last.slice(0,7), period = daily.slice(-range);
     const sum = rows => rows.length && rows.every(r => r.complete && Number.isFinite(r.amountMilli)) ? rows.reduce((n,r) => n + r.amountMilli,0) : null;
     set('billing-today', moneyMilli(sum(daily.slice(-1))));set('billing-week', moneyMilli(sum(daily.slice(-7))));
     set('billing-month', moneyMilli(sum(daily.filter(r => r.date.startsWith(month)))));set('billing-period-total', moneyMilli(sum(period)));
     const partial = data && (!data.pagination.complete || daily.some(d => !d.complete));
-    set('billing-coverage', data?.checkedAt ? data.dateFrom + ' 至 ' + data.dateTo + ' · 已读取 ' + data.pagination.read + (data.pagination.total !== null ? ' / ' + data.pagination.total : '') + ' 条 · ' + (partial ? '尚未完整：' + (data.pagination.reason || '部分记录的日期或金额无法确认') + '。未知日期不按零消费计算。' : '分页完整') + (overview()?.walletError ? '；余额：' + overview().walletError : '') : '账单尚未同步。');
+    set('billing-coverage', data?.checkedAt ? data.dateFrom + ' 至 ' + data.dateTo + ' · ' + data.pagination.read + (data.pagination.total !== null ? ' / ' + data.pagination.total : '') + ' 条' + (partial ? ' · 尚未完整：' + (data.pagination.reason || '部分记录的日期或金额无法确认') : '') + (overview()?.walletError ? '；余额：' + overview().walletError : '') : '尚未同步账单');
     $('#billing-chart-empty').hidden = !!daily.length;
     renderChart(period);
     const items = (data?.items || []).filter(i => i.date === null || i.date >= (period[0]?.date || '') && i.date <= last);
@@ -137,7 +138,7 @@
     list.classList.toggle('is-expanded', ledgerExpanded);
     $('#billing-transactions-count').hidden = !recent.length;
     set('billing-transactions-count', recent.length
-      ? (ledgerExpanded || !hasMore ? '最近 ' + recent.length + ' 条已读取流水' : '显示最近 ' + shown.length + ' 条 · 可展开查看 ' + recent.length + ' 条') + (recent.some(i => i.date === null) ? ' · 含日期待确认项' : '')
+      ? (ledgerExpanded || !hasMore ? '最近 ' + recent.length + ' 条' : '显示 ' + shown.length + ' / ' + recent.length + ' 条') + (recent.some(i => i.date === null) ? ' · 含日期待确认项' : '')
       : synced ? '当前区间暂无流水。' : '同步后查看近期流水。');
     html('billing-transactions', shown.length ? '<table class="ledger-table" aria-label="近期流水"><thead><tr><th scope="col">北京时间</th><th scope="col">项目 / 实例</th><th scope="col">类型</th><th scope="col">金额</th></tr></thead><tbody>' + shown.map(i => '<tr><td>' + (i.at ? when(i.at) : '日期未知') + '</td><td>' + esc(i.name || i.instanceId || '—') + '</td><td>' + esc(i.typeLabel || i.type) + '</td><td>' + moneyMilli(Number.isFinite(i.amountMilli) ? i.amountMilli : i.transactionMilli) + '</td></tr>').join('') + '</tbody></table>' : empty(synced ? '当前区间暂无流水。' : '同步后查看近期流水。'));
   }

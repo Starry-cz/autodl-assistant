@@ -1,14 +1,14 @@
 import { AppError, fail } from './errors.mjs';
 import { checkModelItems } from './env-plan.mjs';
 
-// Presets are editable connection hints, not guarantees of model availability or price.
+// 服务商提示只说明填写要求；模型可用性与费用由用户账号决定。
 export const AI_PROVIDERS = [
   { id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash',
-    hint: '默认模型名按2026-10-28官方文档填写；可改为账号已开通的模型。' },
+    hint: '填写账号已开通的模型 ID。' },
   { id: 'dashscope', name: '阿里云百炼 / 通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus',
-    hint: '默认 qwen-plus（也可用 qwen-flash）：支持非流式调用与关闭思考（本工具请求时关闭思考）；换用其他模型请确认它支持这两点。可将Base URL改为控制台提供的工作空间专属兼容地址，注意Key所属地域。' },
+    hint: '模型需支持非流式调用和关闭思考；地址与 Key 的地域需一致。' },
   { id: 'custom', name: '其他 Chat Completions 兼容接口', baseUrl: '', model: '',
-    hint: '仅支持HTTPS、Bearer Key鉴权的非流式Chat Completions接口；不代表支持所有厂商的原生协议。' },
+    hint: '使用 HTTPS、Bearer Key 鉴权的非流式 Chat Completions 接口。' },
 ];
 export const AI_INPUT_LIMIT = 16000;
 const RESPONSE_LIMIT = 262144;

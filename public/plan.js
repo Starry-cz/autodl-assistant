@@ -9,12 +9,12 @@ function renderPlanControls() {
   use.disabled = !ready || planBusy; if (!ready) use.checked = false;
   $('#plan-consent').classList.toggle('hidden', !use.checked);
   const provider = (appState.aiProviders || []).find(p => p.id === ai?.provider);
-  $('#plan-consent-text').textContent = '我已检查本次文本，同意发送给 ' + (provider?.name || '所选模型服务商') + ' 分析（使用自己的 API Key，可能产生服务商费用）';
-  use.parentElement.title = ready ? '' : '在下方“模型设置”中填写你自己的 API Key 并启用后可用';
+  $('#plan-consent-text').textContent = '我同意将本次文本发送给 ' + (provider?.name || '所选模型服务商') + ' 分析，可能产生服务商费用。';
+  use.parentElement.title = ready ? '' : '请先在“模型设置”中配置并启用 API Key';
   $('#plan-submit').disabled = planBusy;
 }
 function planConstraints(rows) {
-  if (!rows.length) return '<p class="hint">资料里没有读出版本或显存要求，下面只按型号本身判断。可以补充 requirements.txt 或 README 中写明硬件要求的段落。</p>';
+  if (!rows.length) return '<p class="hint">未识别到版本或显存要求，请补充项目依赖或硬件要求。</p>';
   return '<table class="plan-table"><thead><tr><th>条件</th><th>读到的值</th><th>来源</th><th>原文依据</th></tr></thead><tbody>' + rows.map(r =>
     '<tr><td>' + esc(r.label) + '</td><td><strong>' + esc(r.value) + '</strong>' + (r.ambiguous ? ' <span class="badge warning">待确认</span>' : '') + (r.note ? '<small>' + esc(r.note) + '</small>' : '') +
     '</td><td>' + planSource(r.source) + '</td><td>' + (r.evidence || []).map(e => '<code>' + esc(e) + '</code>').join('') + '</td></tr>').join('') + '</tbody></table>';
@@ -39,16 +39,16 @@ function renderPlan(plan) {
       (plan.model.summary ? '：' + esc(plan.model.summary) : '') + '</p>' + (plan.model.rejected?.length ? '<details><summary>丢弃 ' + esc(plan.model.rejected.length) + ' 条模型输出（引用核对未通过）</summary><ul>' +
       plan.model.rejected.map(r => '<li>' + esc(r.field) + ' = ' + esc(r.value) + '：' + esc(r.reason) + '</li>').join('') + '</ul></details>' : '') : '';
   // 复用公共时间格式化函数显示快照时间，避免引用已不存在的相对时间函数中断整个结果渲染。
-  const catalog = plan.catalogCheckedAt ? '型号目录同步于 ' + time(plan.catalogCheckedAt, true) + '，括号内是当时的空闲/总数，不是实时库存。' : '还没有同步 AutoDL 型号目录：请先在“资源监测”页登录并点“同步 AutoDL 型号”。';
+  const catalog = plan.catalogCheckedAt ? '目录更新于 ' + time(plan.catalogCheckedAt, true) : '请连接账号，在“抢卡控制台”同步 AutoDL 型号';
   const notices = (plan.notices || []).map(n => '<p class="notice">' + esc(n) + '</p>').join('');
   panel.innerHTML = '<h2>规划结果 · 待你确认</h2>' + notices + model +
     '<div class="ai-result-section"><h3>读出的条件</h3>' + planConstraints(plan.constraints) + '</div>' +
-    '<div class="ai-result-section"><h3>可以等待的型号</h3><p class="hint">' + esc(catalog) + ' 一个任务只等一种型号；想同时等多种，请分别建任务，两边都抢到会各自计费。</p>' +
+    '<div class="ai-result-section"><h3>候选型号</h3><p class="hint">' + esc(catalog) + '。多个任务成功后分别计费。</p>' +
     (usable.length ? '<table class="plan-table"><thead><tr><th>型号</th><th>结论</th><th>各地区空闲/总数</th><th>原因</th><th></th></tr></thead><tbody>' + planGpuRows(usable, true) + '</tbody></table>' : '<p class="notice">目录中没有满足条件的型号。</p>') +
     (excluded.length ? '<details><summary>不满足条件的型号（' + esc(excluded.length) + '）</summary><table class="plan-table"><tbody>' + planGpuRows(excluded, false) + '</tbody></table></details>' : '') + '</div>' +
-    '<div class="ai-result-section"><h3>拿到实例后的检查</h3><p class="hint">在实例终端里运行，核对型号、显存、驱动与 PyTorch 能否使用这张卡。克隆到其他型号前，也可在源实例运行第二条，把输出贴回上方检查目标卡。本工具不会替你执行。</p><pre class="plan-commands">' +
+    '<div class="ai-result-section"><h3>实例检查命令</h3><p class="hint">在实例终端运行，核对 GPU、驱动和 PyTorch。</p><pre class="plan-commands">' +
     plan.setupCommands.map(esc).join('\n') + '</pre></div>' +
-    '<p class="notice">规划只读取你提交的文本和本机保存的型号目录，没有创建或修改任务。填入后仍需你确认费用授权并提交；提交前程序照常核对库存、驱动、价格与镜像。</p>';
+    '<p class="notice">填入任务后，请核对配置和费用再提交。</p>';
 }
 planForm.addEventListener('submit', async event => {
   event.preventDefault();
@@ -58,10 +58,10 @@ planForm.addEventListener('submit', async event => {
   if (!data.request.trim() && !data.projectText.trim()) { toast('请先粘贴项目资料', true); return; }
   if (data.useModel && !data.consent) { toast('请先勾选同意把本次文本交给模型分析', true); return; }
   planBusy = true; renderPlanControls();
-  $('#plan-status').textContent = data.useModel ? '正在请求模型服务；资源监测继续运行。' : '正在按规则分析……';
+  $('#plan-status').textContent = data.useModel ? '正在请求模型分析…' : '正在按规则分析…';
   try {
     const plan = await api('/api/plan', data); renderPlan(plan);
-    $('#plan-status').textContent = plan.model?.error ? '模型补充失败，已显示规则结果。' : '分析完成。结论待你确认，没有创建任务。';
+    $('#plan-status').textContent = plan.model?.error ? '模型补充失败，已显示规则结果。' : '分析完成，请核对结果。';
   } catch (error) { $('#plan-status').textContent = error.message; toast(error.message, true); }
   finally { planBusy = false; planForm.elements.consent.checked = false; renderPlanControls(); }
 });

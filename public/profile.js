@@ -8,17 +8,17 @@
   function renderProfile(){
     const identity=current(), ready=connected(), session=appState.browser?.session;
     $('#account-name').textContent=identity?.displayName || (ready?'AutoDL 账号':'登录 AutoDL');
-    $('#account-status').textContent=syncing?'正在同步账号内容':ready?(session?.background?'后台已连接':'账号已连接'):session?.browserOpen?'等待登录与核验':'账号与设置';
+    $('#account-status').textContent=syncing?'正在同步':ready?(session?.background?'后台已连接':'账号已连接'):session?.browserOpen?'等待登录':'账号与设置';
     $('#account-avatar').textContent=identity?.displayName?.slice(0,1).toUpperCase() || 'AD';
     $('#profile .profile-avatar').textContent=$('#account-avatar').textContent;
     $('#profile-name').textContent=identity?.displayName || '连接你的 AutoDL 账号';
-    $('#profile-id').textContent=identity?'账号 ID：'+identity.accountId+(identity.subAccountId?' · 子账号 '+identity.subAccountId:''):'登录信息仅在本机专用浏览器中使用。';
+    $('#profile-id').textContent=identity?'账号 ID：'+identity.accountId+(identity.subAccountId?' · 子账号 '+identity.subAccountId:''):'请连接 AutoDL 账号。';
     $('#profile-status').textContent=ready?(identity?.kind==='sub'?'子账号已连接':'账号已连接'):appState.account?.error || '尚未连接';
-    $('#profile-sync-status').textContent=progress || (ready?(session?.background?'当前账号已在后台连接，可同步实例、账单与库存。':'已连接当前账号，可同步实例、账单与库存。'):'在 AutoDL 窗口完成登录后，会自动转到后台并同步账号内容。');
+    $('#profile-sync-status').textContent=progress || (ready?'可同步实例、账单与库存。':'请在 AutoDL 窗口完成登录。');
     $('#profile-sync').disabled=!ready || syncing || !!appState.browser?.busy || !!browserAction;
     const unclaimed=appState.account?.unclaimedCount||0;
     $('#profile-legacy-note').hidden=!unclaimed;
-    $('#profile-legacy-note').textContent='本机有 '+unclaimed+' 条旧任务尚未确认归属。同步实例后会按实例 ID 匹配；未匹配的记录保留在本机，不混入当前账号。';
+    $('#profile-legacy-note').textContent='本机有 '+unclaimed+' 条任务待确认归属，请同步实例核对。';
   }
   async function syncWorkspace({returnToOverview=false}={}){
     if(syncing||!connected())return;
@@ -39,11 +39,11 @@
         // 用户退出或更换账号后终止后续同步，不继续使用先前的实例选择。
         if(!connected()||current()?.ownerId!==owner)break;
       }
-      progress=errors.length?'部分内容未同步：'+errors.join('；'):connected()?'当前账号的实例、账单与库存已同步。':'连接已断开，重新登录后同步。';
+      progress=errors.length?'部分内容未同步：'+errors.join('；'):connected()?'实例、账单与库存已同步。':'连接已断开，重新登录后同步。';
     } finally {syncing=false;window.workspaceSyncing=false;renderProfile();}
   }
   $('#profile-sync').addEventListener('click',()=>void syncWorkspace());
-  $('#open-browser').addEventListener('click',()=>{loginWatchAt=Date.now();progress='请在 AutoDL 官方窗口完成登录，成功后窗口将关闭，后续同步在后台进行。';renderProfile();});
+  $('#open-browser').addEventListener('click',()=>{loginWatchAt=Date.now();progress='请在 AutoDL 窗口完成登录，成功后自动返回。';renderProfile();});
   // 登录检查只读页面状态；人工验证由用户在官网完成，不代为输入密码或验证码。
   setInterval(async()=>{
     if(!loginWatchAt||Date.now()-loginWatchAt>10*60000||browserAction||appState.browser?.busy||syncing)return;

@@ -19,7 +19,7 @@ async function api(url, data) {
   const result=await response.json();
   if(!response.ok){
     const missingInterface=response.status===404&&result.error==='NOT_FOUND'&&result.message==='接口不存在';
-    const message=missingInterface?'本地后台未加载此功能接口，可能仍在运行旧版代码。请先正常停止旧后台，在项目目录运行 npm.cmd start，再刷新页面；仅刷新网页不会更新后台。':result.message||'请求失败';
+    const message=missingInterface?'后台版本不匹配，请正常退出并重新启动助手。':result.message||'请求失败';
     const error=new Error(message);error.status=response.status;error.code=result.error;error.conflict=result.conflict;throw error;
   }
   return result;
@@ -48,7 +48,7 @@ function updateGpuSelection(){
   $('#gpu-model-title').textContent=currentMode!=='clone'?'GPU 精确型号':source?'目标 GPU 型号（可更换）':'目标 GPU 型号';
   $('#metric-gpu-model').textContent=model || '尚未选择';
   $('#metric-gpu-model').classList.toggle('long-model',model.length>22);
-  $('#metric-gpu-detail').textContent=model ? form.elements.gpuCount.value+' 张 · '+(currentMode==='boot'?'原实例开机':currentMode!=='clone'?'新建实例':!source||same?'同源型号克隆':'克隆到其他型号') : '由你指定，不自动代选';
+  $('#metric-gpu-detail').textContent=model ? form.elements.gpuCount.value+' 张 · '+(currentMode==='boot'?'原实例开机':currentMode!=='clone'?'新建实例':!source||same?'同源型号克隆':'克隆到其他型号') : '选择 GPU 型号';
   renderGpuCatalogStatus();
 }
 // 任务的环境 CUDA：新建取所选镜像；克隆取首次检查时从源实例读到的 CUDA。
@@ -122,7 +122,7 @@ function renderGpuCatalogStatus(){
   const text=gpuSyncing?'正在同步各地区 GPU 型号与库存…'
     :gpuSyncError?'同步失败：'+gpuSyncError
     :!catalog?(ready?'同步后选择所需 GPU 型号。':'连接账号后同步 GPU 型号。')
-    :'同步于 '+time(catalog.checkedAt,true)+' · 括号内为空闲 / 总数快照。'+(issues.length?issues.join('、')+'，请重新同步。':'')
+    :'同步于 '+time(catalog.checkedAt,true)+' · 空闲 / 总数'+(issues.length?' · '+issues.join('、')+'，请重新同步。':'')
       +(unlisted?(clone?'源实例型号未列出，请重新同步核对。':'所选型号未列出，请核对地区或重新同步。'):'');
   const hint=$('#gpu-model-hint');
   if(hint.textContent!==text)hint.textContent=text;
@@ -166,7 +166,7 @@ function updateForm(){
   $('#action-notify-description').textContent=boot?'发现原主机有卡时提醒，不开机':'发现符合条件的资源后提醒，不创建实例';
   $('#consent-text').textContent=boot?'我授权为选中的原实例自动有卡开机，沿用原计费方式并产生费用。运行后需在 AutoDL 自行关机。':'我授权按提交时 AutoDL 报价自动创建或克隆并开机，费用由本人承担。预览不锁价，运行后需自行关机。';
   $('#submit-task').innerHTML=(boot?(execute?'开始等待并开机':'监测原实例 GPU'):(execute?'启用真实抢卡':'开始真实库存监测'))+' <span>→</span>';
-  $('#task-footnote').textContent=boot?'确认原实例有卡运行后结束任务。暂停只停止本地检查，不会关闭云端实例。':'成功后停止当前任务；提交结果不明时先核对，不重复下单。';
+  $('#task-footnote').textContent=boot?'暂停监测不会关闭云端实例。':'成功后自动结束监测。';
   form.elements.fullScanSeconds.disabled=boot||form.elements.scanScope.value!=='first-page';
   updateGpuSelection();
   window.updateAccountForm?.();
@@ -178,8 +178,8 @@ function renderServer(){
   // 磁盘代码已更新而后台仍在运行旧版本时提示；旧版后台的状态里没有 server 字段。
   const node=$('#stale-backend'),server=appState.server,stale=!server||server.codeChanged===true;
   node.hidden=!stale;
-  const text=!server?'本地后台仍是旧版本，新功能没有生效。关闭网页或再次双击“启动抢卡助手.cmd”都不会替换已在运行的后台。请先暂停任务、确认没有“提交中/验证实例与数据/等待绑定核对”的任务，再在任务管理器“详细信息”中结束本项目的 node.exe，关闭专用浏览器窗口，然后重新双击“启动抢卡助手.cmd”。'
-    :'磁盘上的程序已更新，但本地后台仍在运行启动时的代码。关闭网页不会停止后台。桌面版请从托盘选择“停止并退出”后重新打开；源码版请先运行“停止抢卡助手.cmd”，等待停止后再运行“启动抢卡助手.cmd”。';
+  const text=!server?'后台版本不匹配。请等待任务提交或核对完成，再正常退出并重新启动助手。'
+    :'请重启以加载修改。桌面版从托盘“停止并退出”；网页版运行“停止抢卡助手.cmd”后重新启动。';
   if(stale&&node.textContent!==text)node.textContent=text;
 }
 function renderBrowser(){
@@ -189,8 +189,10 @@ function renderBrowser(){
   card.dataset.session=session.state;
   badge.textContent=session.label;badge.className='badge'+(ready?'': ['expired','human_required','network_blocked','error','unknown','login_required'].includes(session.state)?' warning':' neutral');
   if(session.state==='ready'&&!ready)badge.textContent='账号待确认';
+  // 已连接状态由徽标展示，错误和待登录原因继续直接显示。
+  $('#browser-status').hidden=ready;
   if($('#browser-status').textContent!==session.message)$('#browser-status').textContent=session.message;
-  $('#browser-checked-at').textContent=session.checkedAt?'最近核验：'+time(session.checkedAt,true)+' · 仅代表当时状态，任务执行时仍会检查。':'尚未核验；打开浏览器不代表已登录。';
+  $('#browser-checked-at').textContent=session.checkedAt?'最近核验：'+time(session.checkedAt,true):'尚未检查登录';
   $('#open-browser').disabled=busy;
   $('#open-browser').textContent=browserAction==='open'?'正在连接…':ready?'重新连接账号':['expired','login_required'].includes(session.state)?'重新登录':session.state==='human_required'?'处理人工验证':session.state==='network_blocked'?'重试打开登录':'打开登录';
   $('#check-browser').disabled=busy||!session.browserOpen;
@@ -198,10 +200,11 @@ function renderBrowser(){
   $('#logout-browser').disabled=busy||!!appState.browser?.busy;
   $('#logout-browser').textContent=browserAction==='logout'?'正在退出…':'退出 AutoDL';
   $('#account-menu-logout').disabled=$('#logout-browser').disabled || (!ready&&!session.browserOpen);
-  $('#check-browser').title=session.browserOpen?'只读检查，不会租用 GPU':'请先打开专用浏览器';
+  $('#check-browser').title=session.browserOpen?'检查账号连接状态':'请先打开专用浏览器';
   $('#browser-busy').classList.toggle('hidden',!appState.browser?.busy||!!browserAction||checking);
-  $('#live-note').textContent=ready?(currentMode==='boot'?'沿用原 GPU、地区与计费方式。无卡运行中的实例，请先到 AutoDL 手动关机。':'已连接 AutoDL，可选择仅提醒或自动执行。'):'点击左下角账号入口连接 AutoDL，再开始监测。';
+  // 账号已连接时不重复解释表单；保留开机前提和未登录指引。
   $('#live-note').hidden=ready&&currentMode!=='boot';
+  $('#live-note').textContent=ready?'无卡运行的实例，请先在官网关机。':'点击左下角头像连接 AutoDL 账号。';
 }
 function focusLogin(){
   $('.nav-item[data-view="profile"]').click();
@@ -249,8 +252,9 @@ function renderQueueToggle(){
   panel.classList.toggle('collapsed',queueCollapsed);
   button.textContent=queueCollapsed?'展开':'收起';button.setAttribute('aria-expanded',String(!queueCollapsed));
   const active=tasks.filter(t=>ACTIVE.includes(t.state)).length,attention=tasks.filter(t=>['attention','reconciling'].includes(t.state)).length;
-  $('#queue-summary').textContent=queueCollapsed?'已收起：进行中 '+active+' 个，需要处理 '+attention+' 个，其余 '+(tasks.length-active-attention)+' 个。':'无库存时静默等待，关键变化时通知。';
+  // 展开时由任务列表呈现状态，收起后再显示汇总，避免重复说明。
   $('#queue-summary').hidden=!queueCollapsed;
+  $('#queue-summary').textContent=queueCollapsed?'进行中 '+active+' · 待处理 '+attention+' · 其余 '+(tasks.length-active-attention):'';
 }
 $('#toggle-queue').addEventListener('click',()=>{queueCollapsed=!queueCollapsed;try{localStorage.setItem('queueCollapsed',queueCollapsed?'1':'0');}catch{}renderQueueToggle();});
 function delivery(n){const values=Object.entries(n.deliveries||{});return values.length?values.map(([key,val])=>`${key==='wechat'?'微信':'Webhook'}：${val.ok?'已发送':`发送失败（${val.error||'等待重试'}）`}`).join(' · '):'已记录本地消息';}
@@ -264,7 +268,7 @@ function renderDetail(){
   const t=appState.tasks.find(t=>t.id===detailId);if(!t)return;const c=t.config;
   if($('#task-dialog').contains(document.activeElement)&&['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))return;
   $('#detail-title').textContent=c.name;
-  const html=`<div id="detail-state">${badge(t.state,c.mode)} 真实 AutoDL 任务 · ${c.action==='execute'?'发现后自动提交':'仅监测通知'}</div><div class="detail-grid"><div><small>资源条件</small>${esc(c.gpuModel)} × ${c.gpuCount} / ${esc(taskCuda(t))}<br>${esc(c.regions.join('、'))}<br>${c.pollSeconds}s 检查间隔 · ${esc(scanLabel(c))}</div><div><small>${c.mode==='boot'?'原实例计费':c.pricePolicy==='official'?'平台报价':'单价边界'}</small>${c.mode==='boot'?'沿用原实例计费方式和配置。请在 AutoDL 核对价格；本工具不修改计费方式。':c.pricePolicy==='official'?(t.quote?`按平台报价：单卡 ¥${esc(t.quote.host?.price)}/时<br>配置 ¥${esc(t.quote.hourly)}/时，磁盘 ¥${esc(t.quote.storageDaily)}/日`:'按提交时的平台报价，等待完整报价'):`单卡 ≤ ¥${esc(c.maxGpuHourly)}/时<br>配置总价 ≤ ¥${esc(c.maxTotalHourly)}/时，磁盘 ≤ ¥${esc(c.maxStorageDaily)}/日`}</div><div><small>${c.mode==='boot'?'要开机的原实例':c.mode==='clone'?'源实例':'基础镜像'}</small>${esc(c.mode!=='create'?c.sourceId:c.imagePath.join(' / ')||'待核对')}${c.mode==='clone'?(t.source?'<br>源实例 '+esc(t.source.gpuModel||'型号未知')+' × '+esc(t.source.gpuCount??'?')+' · '+esc(t.source.sourceCuda?'CUDA '+t.source.sourceCuda:'CUDA 待读取')+'（只读）':'')+'<br>'+(c.copyDataDisk!==false?'含数据盘复制':'仅系统盘，未复制数据盘'):''}</div><div><small>提交状态</small>${t.operation?esc({intent:'操作意图已保存',click_started:'已进入点击，结果需核对',accepted:'已提交，继续核对实例'}[t.operation.stage]||t.operation.stage):'尚未提交'}<br>${t.operation?.receipt?.instanceId?esc(t.operation.receipt.instanceId):''}</div></div>${t.balanceCheck?.pendingQuote?'<p class="dialog-note">余额接口已连接，等待完整官方报价后判断是否充足；提交前会重新核对。</p>':t.balanceCheck?`<p class="dialog-note">最近余额预检：可用 ¥${esc(t.balanceCheck.available)} / 所需 ¥${esc(t.balanceCheck.required)}，按${t.balanceCheck.basis==='limits'?'价格上限':'实际报价'}及预计 ${esc(t.balanceCheck.hours)} 小时估算，${t.balanceCheck.includeVouchers?'含':'不含'}代金券。预检于 ${time(t.balanceCheck.checkedAt,true)}。</p>`:''}${t.lastError?`<div class="notice">${esc(t.lastError)}</div>`:''}${(t.hostCooldowns||[]).some(r=>r.until>appState.now)?`<p class="dialog-note">暂不选择的主机（最近被平台拒绝下单，到时自动恢复）：${(t.hostCooldowns||[]).filter(r=>r.until>appState.now).map(r=>esc(r.hostNumber||r.hostId)+' 约 '+Math.max(1,Math.ceil((r.until-appState.now)/60000))+' 分钟后，'+esc(r.reason)).join('；')}</p>`:''}${t.quote?`<p class="dialog-note">最后报价：配置 ¥${t.quote.hourly}/时，磁盘 ¥${t.quote.storageDaily}/日，额外扩容 ${t.quote.extraDiskGB} GB。报价不是总消费封顶；任务完成后云端实例会持续运行。</p>`:''}<div class="detail-actions">${ACTIVE.includes(t.state)?`<button class="button small" data-command="pause" data-id="${t.id}">暂停检查</button>`:''}${canResumeTask(t)?`<button class="button small" data-command="resume" data-id="${t.id}">${canReconcileBoot(t)?'继续核对原实例':'恢复检查'}</button>`:''}${!['completed','cancelled'].includes(t.state)?`<button class="button small danger" data-command="cancel" data-id="${t.id}">停止本地任务</button>`:''}</div>${c.mode!=='boot'&&t.operation&&['attention','reconciling','paused','cancelled'].includes(t.state)?`<form class="inline-form" id="attach-form"><label>核对 AutoDL 后，填写此次创建的目标实例 ID<input name="instanceId" placeholder="目标完整 ID，不是源实例" required></label><button class="button small" type="submit">校验并绑定</button></form>`:''}${c.mode!=='boot'&&t.operation&&!t.operation.receipt?.instanceId&&['click_started','accepted'].includes(t.operation.stage)&&['attention','reconciling','paused','cancelled'].includes(t.state)?`<div class="notice"><p>没有可绑定的新实例？程序可重新读取当前账号的完整实例列表：全部都是提交前已有的实例时，才确认这次点击没有创建实例并清除提交记录，之后可恢复任务或新建同型号任务。点击后至少等待2分钟再核对。</p><button type="button" class="button small" data-command="recheck" data-id="${t.id}">重新核对实例列表</button></div>`:''}${t.operation?.receipt&&c.mode==='clone'&&c.copyDataDisk!==false&&['attention','verifying','paused'].includes(t.state)?`<div class="notice"><p>若页面没有明确的复制完成状态，请登录目标实例确认数据盘文件完整，再点下方按钮。不要仅凭开机成功确认。</p><label class="check-label"><input type="checkbox" id="data-confirmed">我已检查目标数据盘，数据复制完整</label><button type="button" class="button small" data-command="verify-data" data-id="${t.id}">提交人工数据核验</button></div>`:''}${window.taskMonitor.history(t)}<div class="logs"><div class="logs-heading"><h3>运行日志 <span class="count">${t.logs.length}</span></h3><button type="button" class="button small" data-export-logs="${esc(t.id)}">导出日志</button></div><div class="log-list">${[...t.logs].reverse().map(l=>`<div class="log ${esc(l.level)}" data-key="${esc(l.at+':'+l.message.slice(0,40))}"><time>${time(l.at)}</time><span>${esc(l.message)}</span></div>`).join('')}</div></div>`;
+  const html=`<div id="detail-state">${badge(t.state,c.mode)} ${c.action==='execute'?'发现后自动提交':'仅监测通知'}</div><div class="detail-grid"><div><small>资源条件</small>${esc(c.gpuModel)} × ${c.gpuCount} / ${esc(taskCuda(t))}<br>${esc(c.regions.join('、'))}<br>${c.pollSeconds}s 检查间隔 · ${esc(scanLabel(c))}</div><div><small>${c.mode==='boot'?'原实例计费':c.pricePolicy==='official'?'平台报价':'单价边界'}</small>${c.mode==='boot'?'沿用原实例计费方式，价格请在 AutoDL 确认。':c.pricePolicy==='official'?(t.quote?`按平台报价：单卡 ¥${esc(t.quote.host?.price)}/时<br>配置 ¥${esc(t.quote.hourly)}/时，磁盘 ¥${esc(t.quote.storageDaily)}/日`:'按提交时的平台报价，等待完整报价'):`单卡 ≤ ¥${esc(c.maxGpuHourly)}/时<br>配置总价 ≤ ¥${esc(c.maxTotalHourly)}/时，磁盘 ≤ ¥${esc(c.maxStorageDaily)}/日`}</div><div><small>${c.mode==='boot'?'要开机的原实例':c.mode==='clone'?'源实例':'基础镜像'}</small>${esc(c.mode!=='create'?c.sourceId:c.imagePath.join(' / ')||'待核对')}${c.mode==='clone'?(t.source?'<br>源实例 '+esc(t.source.gpuModel||'型号未知')+' × '+esc(t.source.gpuCount??'?')+' · '+esc(t.source.sourceCuda?'CUDA '+t.source.sourceCuda:'CUDA 待读取')+'（只读）':'')+'<br>'+(c.copyDataDisk!==false?'含数据盘复制':'仅系统盘，未复制数据盘'):''}</div><div><small>提交状态</small>${t.operation?esc({intent:'操作意图已保存',click_started:'已进入点击，结果需核对',accepted:'已提交，继续核对实例'}[t.operation.stage]||t.operation.stage):'尚未提交'}<br>${t.operation?.receipt?.instanceId?esc(t.operation.receipt.instanceId):''}</div></div>${t.balanceCheck?.pendingQuote?'<p class="dialog-note">等待完整报价后核对余额。</p>':t.balanceCheck?`<p class="dialog-note">最近余额预检：可用 ¥${esc(t.balanceCheck.available)} / 所需 ¥${esc(t.balanceCheck.required)}，按${t.balanceCheck.basis==='limits'?'价格上限':'实际报价'}及预计 ${esc(t.balanceCheck.hours)} 小时估算，${t.balanceCheck.includeVouchers?'含':'不含'}代金券。预检于 ${time(t.balanceCheck.checkedAt,true)}。</p>`:''}${t.lastError?`<div class="notice">${esc(t.lastError)}</div>`:''}${(t.hostCooldowns||[]).some(r=>r.until>appState.now)?`<p class="dialog-note">暂缓重试的主机：${(t.hostCooldowns||[]).filter(r=>r.until>appState.now).map(r=>esc(r.hostNumber||r.hostId)+' 约 '+Math.max(1,Math.ceil((r.until-appState.now)/60000))+' 分钟后，'+esc(r.reason)).join('；')}</p>`:''}${t.quote?`<p class="dialog-note">最后报价：配置 ¥${t.quote.hourly}/时，磁盘 ¥${t.quote.storageDaily}/日，额外扩容 ${t.quote.extraDiskGB} GB。实际费用按运行时长计费，需自行关机。</p>`:''}<div class="detail-actions">${ACTIVE.includes(t.state)?`<button class="button small" data-command="pause" data-id="${t.id}">暂停检查</button>`:''}${canResumeTask(t)?`<button class="button small" data-command="resume" data-id="${t.id}">${canReconcileBoot(t)?'继续核对原实例':'恢复检查'}</button>`:''}${!['completed','cancelled'].includes(t.state)?`<button class="button small danger" data-command="cancel" data-id="${t.id}">停止本地任务</button>`:''}</div>${c.mode!=='boot'&&t.operation&&['attention','reconciling','paused','cancelled'].includes(t.state)?`<form class="inline-form" id="attach-form"><label>核对 AutoDL 后，填写此次创建的目标实例 ID<input name="instanceId" placeholder="目标完整 ID，不是源实例" required></label><button class="button small" type="submit">校验并绑定</button></form>`:''}${c.mode!=='boot'&&t.operation&&!t.operation.receipt?.instanceId&&['click_started','accepted'].includes(t.operation.stage)&&['attention','reconciling','paused','cancelled'].includes(t.state)?`<div class="notice"><p>未找到新实例时，可在提交至少 2 分钟后重新核对。确认未创建后，才能恢复或新建任务。</p><button type="button" class="button small" data-command="recheck" data-id="${t.id}">重新核对实例列表</button></div>`:''}${t.operation?.receipt&&c.mode==='clone'&&c.copyDataDisk!==false&&['attention','verifying','paused'].includes(t.state)?`<div class="notice"><p>请先登录目标实例，确认数据盘文件完整，再提交核验。</p><label class="check-label"><input type="checkbox" id="data-confirmed">我已检查目标数据盘，数据复制完整</label><button type="button" class="button small" data-command="verify-data" data-id="${t.id}">提交人工数据核验</button></div>`:''}${window.taskMonitor.history(t)}<div class="logs"><div class="logs-heading"><h3>运行日志 <span class="count">${t.logs.length}</span></h3><button type="button" class="button small" data-export-logs="${esc(t.id)}">导出日志</button></div><div class="log-list">${[...t.logs].reverse().map(l=>`<div class="log ${esc(l.level)}" data-key="${esc(l.at+':'+l.message.slice(0,40))}"><time>${time(l.at)}</time><span>${esc(l.message)}</span></div>`).join('')}</div></div>`;
   const content=$('#detail-content');if(content.dataset.html===html)return;
   // 记下日志区里看到的第一条，重写后把它放回同一位置；位于最上方时保持在最上方，便于看到新日志。
   const dialog=$('#task-dialog'),oldList=content.querySelector('.log-list'),dialogTop=dialog.scrollTop;
@@ -435,9 +439,9 @@ function showTaskConflict(error, data) {
   $('#conflict-old').textContent=conflict.name+' · '+(STATES[conflict.state]||conflict.state)+' · '+conflict.gpuModel+' · '+(conflict.cuda?'CUDA '+conflict.cuda:'CUDA 跟随源实例')+' · '+(conflict.regions||[]).join(' / ');
   $('#conflict-error').textContent=conflict.lastError?'旧任务原因：'+conflict.lastError:conflict.hasOperation?'旧任务已有提交记录。':'旧任务尚未提交。';
   $('#conflict-current').textContent=modeLabel(data.mode)+' · '+data.gpuModel+' × '+data.gpuCount+' · '+(data.mode==='boot'?'保留原环境':data.mode==='clone'?'CUDA 跟随源实例':'CUDA '+data.cuda)+' · '+data.regions.join(' / ')+(data.action==='execute'?'；符合条件后按当前授权自动提交并开机。':'；仅监测库存并通知。');
-  $('#conflict-help').textContent=!error.conflict?'当前后台仍使用旧版任务接口。请正常停止旧后台，在项目目录运行 npm.cmd start，再刷新页面；当前表单会在关闭此弹窗后保留。'
+  $('#conflict-help').textContent=!error.conflict?'后台版本不匹配，请正常退出并重新启动助手。当前表单已保留。'
     :conflict.replaceable?'可以保留当前配置并重建。新配置、源实例及余额校验通过后，旧任务才会停止；原配置和日志继续保留。'
-    :data.mode==='boot'&&conflict.hasOperation?'原实例已有开机请求需要核对。请回到原任务点击恢复检查，程序会查询同一实例的状态，不会创建新实例。':conflict.hasOperation?'原任务有一次结果不明的提交。请先到 AutoDL 核对：已创建就在原任务中绑定目标实例；确认没有创建，在原任务中点“重新核对实例列表”清除记录后再新建。停止本地任务不会撤销云端租用，也不会清除提交记录。'
+    :data.mode==='boot'&&conflict.hasOperation?'原实例已有开机请求，请在原任务中恢复检查。':conflict.hasOperation?'原任务提交结果待确认。已创建时请绑定目标实例；未创建时点击“重新核对实例列表”。停止任务不会撤销云端租用。'
     :'旧任务仍在运行或等待处理。请先查看并暂停原任务，再按当前配置重建。';
   $('#replace-task').hidden=!conflict.replaceable||!error.conflict;
   $('#replace-task').disabled=conflictBusy;
@@ -454,7 +458,7 @@ $('#task-form').addEventListener('submit',async e=>{
   if(!data.gpuModel){toast('请选择 GPU 精确型号，或填写其他型号',true);return;}
   if(!data.regions.length){toast('请至少选择一个地区',true);return;}
   if(appState.browser?.session?.state!=='ready'||!appState.browser.session.browserOpen){
-    toast('请先登录 AutoDL 并点击“检查登录状态”，确认会话可用后再开始真实监测。',true);focusLogin();return;
+    toast('请先连接 AutoDL 账号。',true);focusLogin();return;
   }
   if(currentMode==='create'&&!window.imageSelectionReady?.()){toast('请同步官方镜像，并完成框架、版本、Python 和 CUDA 的四级选择',true);return;}
   button.disabled=true;try{await api('/api/tasks',data);await taskCreated();}catch(error){if(error.code==='DUPLICATE')showTaskConflict(error,data);else toast(error.message,true);}finally{button.disabled=false;}

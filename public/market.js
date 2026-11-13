@@ -5,7 +5,8 @@
   const element = id => document.getElementById(id);
   const numeric = value => Number.isFinite(value) ? value.toLocaleString('zh-CN') : '—';
   const timeFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-  const dateFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  // 同步时间显示完整年月日，统一使用北京时间。
+  const dateFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   const empty = message => '<p class="market-empty">' + esc(message) + '</p>';
   const set = (id, value) => { if (element(id).textContent !== String(value)) element(id).textContent = value; };
   const html = (id, value) => {
@@ -36,7 +37,7 @@
   }
 
   function barList(rows, kind) {
-    if (!rows.length) return empty('同步目录后显示库存分布。');
+    if (!rows.length) return empty('尚未同步库存');
     const maximum = Math.max(1, ...rows.map(row => row.knownTotal));
     return '<div class="market-bar-list">' + rows.map(row => {
       const label = kind === 'model' ? row.model : row.region;
@@ -55,7 +56,7 @@
   }
 
   function heatmap(data) {
-    if (!data?.models.length) return empty('同步目录后显示型号与地区库存。');
+    if (!data?.models.length) return empty('尚未同步库存');
     const byKey = new Map(data.cells.map(cell => [cell.key + '\n' + cell.region, cell]));
     // 标题区已显示读数说明，表格保留无障碍名称，避免再占一行重复文字。
     return '<table class="market-heatmap-table"><caption class="visually-hidden">型号 × 地区，数值为空闲 / 总数；— 表示未列出或未确认</caption><thead><tr><th scope="col">GPU 型号</th>'
@@ -72,7 +73,7 @@
   }
 
   function trend(history) {
-    if (!history?.some(point => point.complete)) return empty('尚无本会话完整采样。同步后开始记录，不补造历史。');
+    if (!history?.some(point => point.complete)) return empty('同步库存后开始记录趋势');
     // 宽度取实际栏宽，高度由响应式样式指定，避免缩放字体或由 SVG 高度反算自身。
     const chart = element('market-trend');
     const width = Math.max(200, chart.clientWidth), height = parseFloat(getComputedStyle(chart).getPropertyValue('--plot-height'));
@@ -96,7 +97,7 @@
     // 窄图只保留首尾时间，避免三组时间标签相互挤压。
     const ticks = first === last ? [first] : width < 400 ? [first, last] : [first, first + (last - first) / 2, last];
     for (const at of ticks) svg += '<text class="market-chart-label" x="' + x(at) + '" y="' + (height - 14) + '" text-anchor="' + (at === first && first !== last ? 'start' : at === last && first !== last ? 'end' : 'middle') + '">' + timeFormat.format(at) + '</text>';
-    return svg + '</svg><p class="market-chart-note">本会话 ' + history.filter(point => point.complete).length + ' 次完整采样 · 缺失不连线 · 重启后清空</p>';
+    return svg + '</svg><p class="market-chart-note">本次运行 · ' + history.filter(point => point.complete).length + ' 次采样</p>';
   }
 
   function render() {
@@ -106,8 +107,9 @@
     set('market-total', numeric(summary?.total)); set('market-available', numeric(summary?.available));
     set('market-model-count', snapshot ? numeric(summary.modelCount) : '—'); set('market-region-count', snapshot ? summary.regionCount + ' / ' + summary.expectedRegions : '—');
     set('market-updated', snapshot ? dateFormat.format(snapshot.checkedAt) + '（北京时间）' : '尚未同步');
-    set('market-status', !ready() ? '连接 AutoDL 并检查登录后，同步账号可见目录。' : pending === 'catalog' || typeof gpuSyncing !== 'undefined' && gpuSyncing ? '正在逐地区读取型号与库存…' : !snapshot ? '点击同步目录开始。仅记录本会话成功完整采样。'
-      : snapshot.complete ? snapshot.scope + '。数据是同步时快照。' : '目录未完整：' + snapshot.issues.join('；') + '。已知小计仅供参考。');
+    // 指标名称已注明目录范围；状态栏只保留同步进度和需要处理的异常。
+    set('market-status', !ready() ? '连接 AutoDL 后同步库存' : pending === 'catalog' || typeof gpuSyncing !== 'undefined' && gpuSyncing ? '正在同步库存…' : !snapshot ? '点击刷新目录开始'
+      : snapshot.complete ? '目录已同步' : '目录未完整：' + snapshot.issues.join('；'));
     element('market-refresh').disabled = !!pending || !ready() || externalBusy();
     html('market-availability', ring(summary)); html('market-models', barList(snapshot?.models || [], 'model'));
     html('market-regions', barList(snapshot?.regions || [], 'region')); html('market-heatmap', heatmap(snapshot?.heatmap));
@@ -131,14 +133,14 @@
     element('market-host-region').disabled = !!pending;
     element('market-host-clear').disabled = !!pending || !hostModel && !hostRegion;
     element('market-host-refresh').disabled = !!pending || !selected || !ready() || externalBusy();
-    set('market-host-count', hosts ? rows.length + ' / ' + hosts.rows.length + ' 台已读主机' : '尚未读取');
-    set('market-host-status', !ready() ? '连接 AutoDL 后查看主机明细。' : pending === 'hosts' ? (!hostRegion ? '正在逐地区读取 ' + hostModel + ' 的主机；跨地区查询可能需要一些时间，请稍候…' : '正在读取 ' + scope + ' 的主机列表…')
-      : hostError ? '读取失败：' + hostError + (hosts ? '；保留 ' + dateFormat.format(hosts.checkedAt) + ' 的快照。' : '')
-      : !selected ? '先选择一个型号或地区，即可读取主机；两项都为“全部”时不会查询。'
-      : hosts ? (hosts.complete ? '列表已完整读取。' : '列表尚未完整：' + (hosts.note || hosts.error || '仍有未读取主机') + '。') + ' 同步于 ' + dateFormat.format(hosts.checkedAt) + '（北京时间）。小时价以官网列表显示为准。'
-      : '点击刷新读取 ' + scope + ' 的主机。');
+    set('market-host-count', hosts ? rows.length + ' / ' + hosts.rows.length + ' 台' : '尚未读取');
+    set('market-host-status', !ready() ? '连接 AutoDL 后查看主机' : pending === 'hosts' ? (!hostRegion ? '正在读取 ' + hostModel + ' 的各地区主机…' : '正在读取 ' + scope + ' 的主机…')
+      : hostError ? '读取失败：' + hostError + (hosts ? '；显示 ' + dateFormat.format(hosts.checkedAt) + ' 的结果' : '')
+      : !selected ? '选择型号或地区查看主机'
+      : hosts ? (hosts.complete ? '' : '列表尚未完整：' + (hosts.note || hosts.error || '仍有未读取主机') + ' · ') + '同步于 ' + dateFormat.format(hosts.checkedAt) + '（北京时间）'
+      : '点击刷新查看主机');
     if (!hosts || !rows.length) {
-      html('market-host-list', empty(!hosts ? pending === 'hosts' ? '正在读取主机明细…' : selected ? '尚未读取当前筛选结果。' : '点击上方任意型号、地区或热力格查看主机。' : onlyAvailable ? '已读取的结果中暂无可选空卡主机。' : '当前筛选没有读到主机。'));
+      html('market-host-list', empty(!hosts ? pending === 'hosts' ? '正在读取主机…' : selected ? '尚未读取当前筛选结果' : '尚未选择筛选条件' : onlyAvailable ? '已读结果中暂无空闲主机' : '当前筛选暂无主机'));
       return;
     }
     html('market-host-list', '<table class="market-host-table"><caption>' + esc(scope) + '</caption><thead><tr>'
@@ -155,8 +157,8 @@
     element('market-track-toggle').setAttribute('aria-pressed', String(tracking));
     const seconds = Math.max(0, Math.ceil((lastAttempt + Number(element('market-interval').value) * 1000 - Date.now()) / 1000));
     set('market-tracking-status', pending ? (tracking ? '' : '跟踪已暂停；') + (pending === 'hosts' ? '正在读取当前主机明细' : '正在同步目录')
-      : !tracking ? '跟踪已暂停，仍可手动刷新。' : !ready() ? '等待账号连接。' : !visible() ? '等待返回监控室后继续跟踪。'
-      : externalBusy() ? '等待当前页面操作完成。' : seconds + ' 秒后更新目录' + (hostModel || hostRegion ? '与当前主机明细。' : '。'));
+      : !tracking ? '跟踪已暂停' : !ready() ? '等待账号连接' : !visible() ? '返回监控室后继续'
+      : externalBusy() ? '等待当前操作完成' : seconds + ' 秒后刷新' + (hostModel || hostRegion ? '目录与明细' : '目录'));
   }
   async function fetchHosts() {
     const selectedOwner = owner(), model = hostModel, region = hostRegion;

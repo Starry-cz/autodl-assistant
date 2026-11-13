@@ -34,7 +34,7 @@ function updateImageForm(){
   const form=$('#task-form'),create=currentMode==='create';
   if(imageMode!==currentMode){
     imageRevision++;
-    if(imageLoading)imageMessage='上次同步因切换模式已取消，请重新同步，或重新选择上级环境。';
+    if(imageLoading)imageMessage='已切换模式，请重新同步镜像。';
     imageLoading=false;
     // 克隆不填写 CUDA：环境随源实例系统盘，首次检查时从 AutoDL 克隆页读取。
     form.elements.cuda.value=create&&imageSelectionReady()?imageSelects[3].value.replace(/^CUDA\s*/i,''):'';
@@ -61,7 +61,7 @@ async function loadImageLevel(level){
     const placeholder=new Option('请选择'+imageNames[level],'');placeholder.disabled=true;
     imageSelects[level].replaceChildren(placeholder,...options);imageSelects[level].value='';
     imageCheckedAt=result.checkedAt;
-    imageMessage=options.some(option=>!option.disabled)?'请选择'+imageNames[level]+'。':'当前分支暂无可用的'+imageNames[level]+'选项，请选择其他上级环境或重新同步。';
+    imageMessage=options.some(option=>!option.disabled)?'请选择'+imageNames[level]+'。':'暂无可用的'+imageNames[level]+'，请更换上级选项或重新同步。';
   }catch(error){
     if(revision!==imageRevision)return;
     resetImageLevels(level);imageMessage='同步失败：'+error.message;toast(imageMessage,true);
@@ -98,8 +98,8 @@ window.applyImagePlan=result=>{
   if(result.complete&&imageSelectionValues().every(Boolean)){
     const cuda=imageSelects[3].value.match(/^(?:CUDA\s*)?(1\d\.\d{1,2})$/i)?.[1],form=$('#task-form');
     if(cuda){form.elements.imagePath.value=imagePrefix(4).join(' / ');form.elements.cuda.value=cuda;}
-    imageMessage='已按规划选好镜像，可继续改选。';
-  }else imageMessage='规划在这一级停下，请自行选择后续选项。';
+    imageMessage='已选好推荐镜像。';
+  }else imageMessage='请继续选择镜像选项。';
   window.clearPricing?.();window.renderBudget?.();renderImages();
   return !!$('#task-form').elements.imagePath.value;
 };
