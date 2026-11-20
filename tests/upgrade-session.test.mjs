@@ -17,7 +17,7 @@ const owner = id => normalizeAccountIdentity({ accountId: id, kind: 'main', disp
 const A = owner('upgrade-synthetic-A'), B = owner('upgrade-synthetic-B');
 
 // 仅使用临时状态与合成会话，任何付费或交互登录调用都使验收失败。
-async function setup(t, { restoredOwner = A, sessionState = 'ready', blocked = false } = {}) {
+async function setup(t, { restoredOwner = A, sessionState = 'ready', blocked = false, startEngine = true } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autodl-upgrade-session-'));
   const disk = new Store(dir);
   disk.data.accountOwnerId = A.ownerId;
@@ -40,7 +40,7 @@ async function setup(t, { restoredOwner = A, sessionState = 'ready', blocked = f
     submit: async () => { throw Error('升级验收禁止付费'); },
     boot: async () => { throw Error('升级验收禁止开机'); },
   });
-  const app = createApplication({ runtimeDir: dir, restoreSession: true, adapters: { autodl: adapter },
+  const app = createApplication({ runtimeDir: dir, restoreSession: true, startEngine, adapters: { autodl: adapter },
     updatesOptions: offlineUpdateOptions, fingerprint: () => 'upgrade-session-fixture' });
   await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
   const base = 'http://127.0.0.1:' + app.server.address().port;
@@ -76,6 +76,18 @@ test('升级交接先恢复同账号会话，再启动监测；不改暂停状�
   assert.equal(f.app.store.get(f.waiting.id).state, 'watching');
   assert.equal(f.app.store.get(f.waiting.id).deadlineAt, f.waiting.deadlineAt);
   assert.equal(f.app.store.get(f.paused.id).state, 'paused');
+});
+
+test('重启只接回刚核对的保存账号，不能用第二次查询替换身份及原凭据', async t => {
+  const f = await setup(t, { blocked: true, startEngine: false });
+  let reads = 0;
+  f.app.adapters.autodl.readIdentity = async () => ++reads === 1 ? A : B;
+  f.gateReady.resolve();
+  await f.app.ready;
+  const state = await (await fetch(f.base + '/api/state', { headers: { 'X-Local-Token': f.app.token } })).json();
+  assert.equal(state.account.identity.ownerId, A.ownerId);
+  assert.equal(f.app.store.data.accountOwnerId, A.ownerId);
+  assert.equal(reads, 1);
 });
 
 test('升级恢复发现另一个账号时暂停原任务，不继续检查库存或自动下单', async t => {
@@ -129,7 +141,8 @@ test('磁盘页面更新后旧后台仍提供原资源，切换后台后才提�
   const root = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autodl-upgrade-session-'));
   // 拷贝最小项目到临时目录，绝不改动正在运行的工作区页面。
-  for (const name of ['src', 'public']) fs.cpSync(path.join(root, name), path.join(dir, name), { recursive: true });
+  // Windows 便携 Node 22 在中文目录上同步递归复制可能导致进程退出，使用异步文件 API。
+  for (const name of ['src', 'public']) await fs.promises.cp(path.join(root, name), path.join(dir, name), { recursive: true });
   fs.copyFileSync(path.join(root, 'package.json'), path.join(dir, 'package.json'));
   fs.symlinkSync(path.join(root, 'node_modules'), path.join(dir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
   const copied = await import(pathToFileURL(path.join(dir, 'src/server.mjs')).href);

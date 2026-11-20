@@ -1,6 +1,6 @@
 {
   "name": "autodl-gpu-watch",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -27,6 +27,7 @@
     "test:tasks-ui": "node scripts/tasks-ui-smoke.mjs",
     "test:boot-ui": "node scripts/boot-ui-smoke.mjs",
     "test:design-ui": "node scripts/design-ui-smoke.mjs",
+    "test:help-ui": "node scripts/ui-help-smoke.mjs",
     "test:account-ui": "node scripts/account-ui-smoke.mjs",
     "diagnose:network": "node scripts/network-check.mjs",
     "test:images-ui": "node scripts/images-ui-smoke.mjs",
@@ -38,7 +39,8 @@
     "test:updates-ui": "node scripts/updates-ui-smoke.mjs",
     "test:notifications-ui": "node scripts/notification-test-ui-smoke.mjs",
     "test:task-monitor-ui": "node scripts/task-monitor-ui-smoke.mjs",
-    "test:parallel-inventory": "node scripts/parallel-inventory-smoke.mjs"
+    "test:parallel-inventory": "node scripts/parallel-inventory-smoke.mjs",
+    "test:task-precheck": "node scripts/task-precheck-smoke.mjs"
   },
   "dependencies": {
     "playwright": "^1.56.0"

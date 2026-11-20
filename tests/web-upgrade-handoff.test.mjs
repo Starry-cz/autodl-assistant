@@ -7,12 +7,33 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
+import { prepareWebUpgrade } from '../src/upgrade.mjs';
 
 async function until(predicate, timeout = 10000) {
   const end = Date.now() + timeout;
   while (Date.now() < end) { if (await predicate()) return; await delay(50); }
   assert.fail('隔离交接测试等待超时');
 }
+
+test('网页版下载中断后清理本次缓存，保留旧版和任务目录', { skip: process.platform !== 'win32' }, async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'autodl-web-upgrade-cache-'));
+  t.after(() => {
+    assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir()));
+    assert.ok(path.basename(root).startsWith('autodl-web-upgrade-cache-'));
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const versions = path.join(root, '.versions'), runtimeDir = path.join(root, '.runtime');
+  fs.mkdirSync(path.join(versions, 'previous'), { recursive: true });
+  fs.mkdirSync(runtimeDir);
+  fs.writeFileSync(path.join(runtimeDir, 'state.json'), '合成任务');
+  t.mock.method(globalThis, 'fetch', async () => new Response(new ReadableStream({ pull(controller) {
+    controller.error(Error('合成下载中断'));
+  } })));
+  await assert.rejects(prepareWebUpgrade({ release: { latestVersion: '99.0.0', updateAvailable: true, downloads: { source: 'https://example.test/synthetic.zip' } },
+    runtimeDir, projectRoot: root, report() {} }), /下载中断/);
+  assert.deepEqual(fs.readdirSync(versions), ['previous']);
+  assert.equal(fs.readFileSync(path.join(runtimeDir, 'state.json'), 'utf8'), '合成任务');
+});
 
 test('网页版实际进程交接等待旧后台退出及新版就绪，再激活原入口，资料原地保留', { timeout: 25000 }, async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'autodl-web-handoff-'));

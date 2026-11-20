@@ -144,9 +144,28 @@ test('平台提示账户问题时同样确认未创建，但不按竞争失败�
  const s=submission();s.view.afterClick='toast';s.view.toast='账户余额不足，请充值后再试';
  await assert.rejects(s.submit,e=>e.code==='SUBMIT_REJECTED'&&e.notCreated===true&&e.race!==true&&e.retryable===false&&/处理账户问题/.test(e.message));
 });
+test('普通网络错误提示不能证明平台拒绝创建，保留本次点击',async()=>{
+ const s=submission();s.view.afterClick='toast';s.view.toast='网络错误，请稍后重试';
+ await assert.rejects(s.submit,e=>e.code==='SUBMIT_UNCLEAR'&&!e.notCreated&&/网络错误/.test(e.message));
+ assert.deepEqual(s.view.events,['mark','click']);
+});
+test('未能标记点击前已有提示时不提交，以免把旧报错当作新回执',async()=>{
+ const s=submission(),evaluate=s.adapter.page.evaluate;
+ s.adapter.page.evaluate=async(fn,args=[])=>{
+   if(args[0]==='mark')throw new Error('合成页面已切换');
+   return evaluate(fn,args);
+ };
+ await assert.rejects(s.submit,/合成页面已切换/);assert.deepEqual(s.view.events,[]);
+});
 test('报错但实例列表出现无法归属的新实例：不清除提交记录',async()=>{
  const extra=submission();extra.view.afterClick='toast';extra.view.instances=[{id:'synthetic-unexpected'}];
  await assert.rejects(extra.submit,e=>e.code==='SUBMIT_UNCLEAR'&&e.notCreated!==true&&/synthetic-unexpected/.test(e.message));
+});
+test('明确拒单后读取实例列表中断，保留拒单证据供后续核对',async()=>{
+ const s=submission();s.view.afterClick='toast';
+ s.adapter.instances=async()=>{throw new Error('合成连接断开');};
+ await assert.rejects(s.submit,e=>e.noAutoBind===true&&!e.notCreated&&/连接断开/.test(e.message));
+ assert.deepEqual(s.view.events,['mark','click']);
 });
 test('点击后出现未识别弹窗或页面没有任何结果：不立即判定未创建，保留提交记录，约2分钟后再核对实例列表',async()=>{
  // 实例可能延迟出现在列表中：立即判定“未创建”会让下一轮再点一次而多租。

@@ -87,6 +87,8 @@ try {
  const missingTask=await page.evaluate(async()=>{try{await api('/api/tasks/missing-task/pause',{});return null;}catch(error){return {message:error.message,status:error.status,code:error.code};}});
  assert.equal(missingTask.status,404);assert.equal(missingTask.message.includes('后台版本不匹配'),false);
 
+ // 修改预算时长和保留余额后，必须重新确认此次费用。
+ assert.equal(await field('paidConsent').isChecked(),false);await field('paidConsent').check();
  await page.locator('#submit-task').click();await page.waitForFunction(()=>document.querySelector('#toast').textContent.includes('低于本次预检所需'));assert.equal(app.store.tasks().length,0);
  assets=100000;await walletPanel();await page.locator('#refresh-wallet').click();await page.waitForFunction(()=>document.querySelector('#wallet-balance').textContent==='¥100.000');await view('dashboard');await page.locator('#check-budget').click();await page.waitForFunction(()=>document.querySelector('#toast').textContent.includes('余额预检通过'));await page.locator('#submit-task').click();await page.waitForFunction(()=>document.querySelector('#task-count').textContent==='1');
  const task=app.store.tasks()[0];assert.equal(task.config.copyDataDisk,false);assert.equal(task.config.gpuModel,'A100 80GB');assert.equal(task.config.gpuCount,2);assert.deepEqual(task.config.regions,['北京B区']);assert.equal(task.balanceCheck.required,8.92);assert.equal(task.state,'queued');assert.equal(task.operation,null);assert.equal(posts.at(-1).copyDataDisk,false);assert.equal(posts.at(-1).pricePolicy,'official');assert.equal(task.config.maxTotalHourly,null);assert.equal(await page.locator('#wallet-form [name=token]').inputValue(),'');assert.equal(app.wallet.publicState().rememberToken,true);

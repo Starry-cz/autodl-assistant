@@ -9,7 +9,9 @@ export function sameTaskResource(task, config) {
     return ['clone', 'boot'].includes(existing.mode) && existing.sourceId === config.sourceId
       && (existing.mode === config.mode || existing.raceBoot === true || config.raceBoot === true);
   }
-  return existing.mode === config.mode && gpuKey(existing.gpuModel) === gpuKey(config.gpuModel);
+  // 历史任务按实验 1 处理。独立实验可租同型号实例，同一实验仍防止重复点击、恢复或重建。
+  return existing.mode === config.mode && gpuKey(existing.gpuModel) === gpuKey(config.gpuModel)
+    && (existing.experimentSlot ?? 1) === (config.experimentSlot ?? 1);
 }
 export function blocksTask(task, config) {
   // 未核验完成的提交记录即使被停止也保留去重保护。
@@ -27,6 +29,7 @@ export function conflictError(task) {
   const conflict = {
     id: task.id, name: task.config.name, state: task.state, mode: task.config.mode,
     gpuModel: task.config.gpuModel, cuda: task.config.cuda, regions: task.config.regions,
+    ...(task.config.mode === 'create' ? {experimentSlot: task.config.experimentSlot ?? 1} : {}),
     lastError: task.lastError || null, hasOperation: !!task.operation,
     replaceable: canReplaceTask(task),
   };

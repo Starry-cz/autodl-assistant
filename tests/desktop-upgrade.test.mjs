@@ -61,6 +61,22 @@ test('下载失败、非Windows x64和不匹配附件都不会继续解压或激
   assert.equal(fs.existsSync(path.join(plan.userData, 'active-desktop.json')), false);
 });
 
+test('桌面更新解压中断时只清理此次下载与半成品，保留已安装目录', async t => {
+  const plan = fixture(t);
+  const updates = path.join(plan.userData, 'updates');
+  const before = fs.readdirSync(updates);
+  const run = async (_file, _args, { env }) => {
+    fs.mkdirSync(env.AUTODL_UPDATE_TARGET);
+    fs.writeFileSync(path.join(env.AUTODL_UPDATE_TARGET, 'partial.bin'), '合成解压数据');
+    throw Error('合成解压中断');
+  };
+  await assert.rejects(prepareDesktopUpdate({ userData: plan.userData, release, report() {},
+    platform: 'win32', arch: 'x64', fetchImpl: async () => new Response('合成压缩包'), run }), /解压中断/);
+  assert.deepEqual(fs.readdirSync(updates), before);
+  assert.equal(fs.readFileSync(plan.executable, 'utf8'), 'synthetic-executable');
+  assert.equal(fs.readFileSync(path.join(plan.runtimeDir, 'state.json'), 'utf8'), '{"syntheticTask":"keep"}');
+});
+
 test('交接等待旧进程退出和新版本健康确认，之后才激活旧快捷方式转发', async t => {
   const plan = fixture(t), launches = [];
   let oldChecks = 0, polls = 0;

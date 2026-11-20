@@ -10,6 +10,7 @@ import { offlineUpdateOptions } from '../tests/fixtures/updates.mjs';
 import { SYNTHETIC_GPU_CATALOG, syntheticGpuCatalog } from '../tests/fixtures/gpu-catalog.mjs';
 import { SyntheticAdapter } from '../tests/fixtures/synthetic-adapter.mjs';
 import { AutoDLBrowserAdapter } from '../src/adapters/autodl.mjs';
+import { POLL_SECONDS } from '../src/config.mjs';
 import { CHECKBOX_SCENARIOS, runCheckboxScenario, checkScenarioExpectation } from '../tests/fixtures/checkbox-pages.mjs';
 
 // 本脚本只使用临时状态、停止的引擎和本地合成页面；不登录、不监测、不租卡。
@@ -70,9 +71,9 @@ try {
   await page.locator('[data-action-choice=observe]').click();
   assert.equal(await form.locator('[name=paidConsent]').evaluate(input => input.required), false);
   const poll = form.locator('[name=pollSeconds]');
-  assert.deepEqual(await poll.evaluate(input => ({ min: input.min, max: input.max, step: input.step, value: input.value })), { min: '10', max: '600', step: '1', value: '10' });
-  for (const value of ['-1', '0', '0.5', '1', '9', '601', '20.5']) { await poll.fill(value); assert.equal(await poll.evaluate(input => input.validity.valid), false); }
-  for (const value of ['10', '14', '600']) { await poll.fill(value); assert.equal(await poll.evaluate(input => input.validity.valid), true); }
+  assert.deepEqual(await poll.evaluate(input => ({ min: input.min, max: input.max, step: input.step, value: input.value })), { min: String(POLL_SECONDS.min), max: String(POLL_SECONDS.max), step: '1', value: String(POLL_SECONDS.default) });
+  for (const value of ['-1', '0', '0.5', String(POLL_SECONDS.max+1), '20.5']) { await poll.fill(value); assert.equal(await poll.evaluate(input => input.validity.valid), false); }
+  for (const value of [String(POLL_SECONDS.min), '3', '5', '9', '10', '14', String(POLL_SECONDS.max)]) { await poll.fill(value); assert.equal(await poll.evaluate(input => input.validity.valid), true); }
   await poll.fill('10');
   // 扫描范围：新表单默认首页优先＋20秒完整翻页；切到每轮完整翻页时不提交间隔。
   await page.locator('#scan-options > summary').click();
@@ -153,6 +154,9 @@ try {
   assert.match(await page.locator('#metric-gpu-detail').textContent(), /同源型号克隆/);
   // 克隆到其他型号：L20 源实例 → RTX 4090 × 2；地区仍为源实例所在地区。
   await model.selectOption('RTX 4090');
+  await page.getByRole('button',{name:'3 秒',exact:true}).click();
+  assert.equal(await poll.inputValue(),'3');
+  assert.equal(await page.getByRole('button',{name:'3 秒',exact:true}).getAttribute('aria-pressed'),'true');
   assert.match(await page.locator('#metric-gpu-detail').textContent(), /克隆到其他型号/);
   assert.match(await page.locator('#source-summary').textContent(), /已改为 RTX 4090 × 2/);
   assert.equal(await form.locator('[name=region]').evaluateAll(nodes => nodes.every(node => node.disabled)), true);
@@ -196,8 +200,8 @@ try {
   assert.equal(posts.every(post => !Object.hasOwn(post, 'customGpuModel') && post.gpuModel !== '__custom__'), true);
   const saved = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8'));
   assert.deepEqual(saved.tasks.map(task => task.config.gpuModel), posts.map(post => post.gpuModel).reverse());
-  assert.equal(posts.every(post => post.pollSeconds === '10'), true);
-  assert.equal(saved.tasks.every(task => task.config.pollSeconds === 10), true);
+  assert.deepEqual(posts.map(post => post.pollSeconds), ['10','3','3','3']);
+  assert.deepEqual(saved.tasks.map(task => task.config.pollSeconds), [3,3,3,10]);
   assert.equal(posts.every(post => post.scanScope === 'first-page' && post.fullScanSeconds === '20' && post.action === 'observe'), true);
   assert.equal(saved.tasks.every(task => task.config.scanScope === 'first-page' && task.config.fullScanSeconds === 20), true);
   assert.equal(app.store.tasks().every(task => task.state === 'queued' && !task.operation), true);

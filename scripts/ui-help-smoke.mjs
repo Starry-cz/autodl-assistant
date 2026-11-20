@@ -42,6 +42,8 @@ try {
       return route.continue();
     });
     const page = await context.newPage();
+    // 在应用创建任何计时器前安装测试时钟，便于精确推进悬浮提示的关闭延时。
+    await page.clock.install();
     page.on('pageerror', error => report.browserErrors.push(error.message));
     page.on('request', request => { if (request.method() === 'POST') report.posts.push(new URL(request.url()).pathname); });
     await page.goto(base + '#dashboard');
@@ -102,6 +104,17 @@ try {
   await page.locator('#dashboard h1').hover(); await hidden(page);
   pass('悬停显示提示，移入提示本身仍可阅读，离开后关闭');
 
+  // 连续离开图标和它的子元素会登记多个关闭事件。旧事件不能关闭随后用键盘打开的提示。
+  await button.hover();
+  await button.evaluate(node => {
+    for (let i = 0; i < 2; i++) node.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse' }));
+    node.focus({ preventScroll: true });
+  });
+  await page.clock.runFor(220); // 推进浏览器时钟越过关闭延时，检查迟到的旧回调。
+  assert.equal(await page.locator('#ui-help-tooltip').isVisible(), true, '切换到键盘后提示应保持可读');
+  await assertTooltip(page, button);
+  await page.keyboard.press('Escape'); await hidden(page);
+
   await button.click(); await assertTooltip(page, button);
   await screenshot(page, 'ui-help-desktop');
   await button.click(); await hidden(page);
@@ -127,6 +140,8 @@ try {
   });
   const modalButton = page.locator('#synthetic-modal-help');
   await modalButton.focus(); await assertTooltip(page, modalButton);
+  await page.locator('.config-fields').evaluate(node => node.dispatchEvent(new Event('scroll')));
+  await assertTooltip(page, modalButton);
   await screenshot(page, 'ui-help-dialog');
   await page.keyboard.press('Escape'); await hidden(page);
   assert.equal(await page.locator('#task-dialog').isVisible(), true, '第一次 Escape 仅关闭提示，不应误关闭对话框');

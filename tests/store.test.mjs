@@ -34,3 +34,63 @@ test('重建保存失败恢复新旧任务内存，磁盘保留可恢复旧记�
   assert.equal(f.store.tasks().length,1);assert.deepEqual(f.task,previous);assert.equal(fs.readFileSync(f.store.file,'utf8'),disk);assert.equal(new Store(f.dir).tasks()[0].state,'attention');
 });
 
+test('恢复落盘失败保留暂停状态，后续无关写入不会偷偷重启任务', t => {
+  const f = fixture(t);
+  f.store.patch(f.task, { state: 'paused' });
+  const previous = structuredClone(f.task);
+  f.advance(1000);
+  const write = t.mock.method(f.store, 'save', () => { throw Error('合成写入失败'); });
+  assert.throws(() => f.engine.control(f.task, 'resume'), /写入失败/);
+  write.mock.restore();
+  assert.deepEqual(f.task, previous);
+  f.store.log(f.task, 'info', '其他操作');
+  const restored = new Store(f.dir).get(f.task.id);
+  assert.equal(restored.state, previous.state);
+  assert.equal(Object.hasOwn(restored, 'notifyEpoch'), false);
+});
+
+for (const [action, state] of [['pause', 'paused'], ['cancel', 'cancelled']]) {
+  test(`请求 ${action} 写盘失败时本进程先停止，明确提示重启可能读到旧状态`, async t => {
+    const f = fixture(t);
+    const diskState = f.task.state;
+    const write = t.mock.method(f.store, 'save', () => { throw Error('合成写入失败'); });
+    assert.throws(() => f.engine.control(f.task, action), /尚未保存.*重启/);
+    assert.equal(f.task.state, state);
+    assert.equal(new Store(f.dir).get(f.task.id).state, diskState);
+    write.mock.restore();
+    await f.engine.tick();
+    assert.equal(f.submissions, 0);
+    f.store.save();
+    assert.equal(new Store(f.dir).get(f.task.id).state, state);
+  });
+}
+
+test('日志和通知写入失败后可重试，重启后各保留一条', t => {
+  const f = fixture(t);
+  const initialLogs = structuredClone(f.task.logs);
+  const write = t.mock.method(f.store, 'save', () => { throw Error('合成写入失败'); });
+  assert.throws(() => f.store.log(f.task, 'warn', '磁盘重试'), /写入失败/);
+  assert.throws(() => f.store.enqueueNotification(f.task, 'found', '找到资源'), /写入失败/);
+  write.mock.restore();
+  assert.deepEqual(f.task.logs, initialLogs);
+  assert.equal(f.store.data.notifications.length, 0);
+  f.store.log(f.task, 'warn', '磁盘重试');
+  f.store.enqueueNotification(f.task, 'found', '找到资源');
+  const restored = new Store(f.dir);
+  assert.equal(restored.get(f.task.id).logs.filter(log => log.message === '磁盘重试').length, 1);
+  assert.equal(restored.data.notifications.length, 1);
+});
+
+test('平台已受理后写盘失败仍保留回执，恢复写盘时能按原实例核对', t => {
+  const f = fixture(t);
+  f.store.patch(f.task, { state: 'submitting', operation: { stage: 'click_started', clickedAt: f.clock() } });
+  const accepted = { ...f.task.operation, stage: 'accepted', receipt: { instanceId: 'synthetic-accepted' } };
+  const write = t.mock.method(f.store, 'save', () => { throw Error('合成写入失败'); });
+  assert.throws(() => f.store.patch(f.task, { state: 'verifying', operation: accepted }), /写入失败/);
+  write.mock.restore();
+  assert.deepEqual(f.task.operation, accepted);
+  assert.equal(new Store(f.dir).get(f.task.id).operation.stage, 'click_started');
+  f.store.patch(f.task, { state: 'verifying' });
+  assert.deepEqual(new Store(f.dir).get(f.task.id).operation, accepted);
+});
+

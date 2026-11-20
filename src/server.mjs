@@ -7,7 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { Store } from './store.mjs';
 import { Engine } from './engine.mjs';
 import { Notifier } from './notifications.mjs';
-import { normalizeConfig, normalizeNotifications, REGIONS } from './config.mjs';
+import { MAX_EXPERIMENT_SLOTS, normalizeConfig, normalizeNotifications, POLL_SECONDS, REGIONS } from './config.mjs';
 import { normalizeGpuCatalog, catalogModelCount } from './gpu-catalog.mjs';
 import { officialPricing } from './matching.mjs';
 import { blocksTask, sameTaskResource, canReplaceTask, conflictError } from './task-conflicts.mjs';
@@ -105,7 +105,7 @@ export function codeFingerprint(root = ROOT) {
 }
 export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR || path.join(ROOT,'.runtime'),
   adapters: suppliedAdapters, startEngine = true, lock = true, aiOptions = {}, walletOptions = {}, secretProtector,
-  onStop = null, onInstallUpdate = null, restoreSession = false, fingerprint = codeFingerprint, imageBusyWaitMs = 20000, updatesOptions = {} } = {}) {
+  onStop = null, onInstallUpdate = null, restoreSession = false, fingerprint = codeFingerprint, imageBusyWaitMs:browserWaitMs = 20000, updatesOptions = {} } = {}) {
   // 相对运行目录统一从项目根目录解析，不依赖启动终端所在位置。
   runtimeDir = path.resolve(ROOT, runtimeDir);
   fs.mkdirSync(runtimeDir, {recursive:true,mode:0o700});
@@ -145,7 +145,7 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
   if(accountEnabled)adapters.autodl.verifyTaskOwner=verifyTaskOwner;
   let pricePreview = null;
   let instanceSync = { instances: [], checkedAt: null, error: null };
-  function visibleIdentity(){const session=adapters.autodl.sessionStatus?.();return session?.state==='ready'&&session.browserOpen?identity:null;}
+  function visibleIdentity(){const session=adapters.autodl.sessionStatus?.();return session?.state==='ready'&&session.browserOpen&&!accountError?identity:null;}
   function visibleCatalog(){return !accountEnabled||visibleIdentity()&&store.data.gpuCatalogOwnerId===identity.ownerId?store.data.gpuCatalog:null;}
   function clearAccountCache(){instanceSync={instances:[],checkedAt:null,error:null};pricePreview=null;observatory.clear();market.clear();}
   function pauseAccountTasks(){for(const task of store.tasks())if(['queued','watching','preparing','submitting','verifying'].includes(task.state))engine.control(task,'pause');}
@@ -165,7 +165,11 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
     if(!accountEnabled)return null;
     let next;
     try {next=await adapters.autodl.readIdentity();}
-    catch(error){identity=null;accountError=redact(messageOf(error));clearAccountCache();throw error;}
+    catch(error){
+      // 短时限流时仅保留上一次核验的身份供下轮比对；本轮数据和操作均等待重新核验。
+      if (error.retryable !== true || allowSwitch) identity=null;
+      accountError=redact(messageOf(error));clearAccountCache();throw error;
+    }
     if(!allowSwitch && identity && next.ownerId!==identity.ownerId){
       pauseAccountTasks();identity=null;clearAccountCache();accountError='专用浏览器中的账号已变化，请重新连接当前账号';
       fail('LOGIN_CHECK_REQUIRED',accountError,{status:409});
@@ -183,12 +187,14 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
     identity=next;accountError=null;return next;
   }
   async function verifyTaskOwner(task){
-    requireSession();await connectIdentity();assertTaskOwner(task,identity);
+    requireSession({rechecking:true});await connectIdentity();assertTaskOwner(task,identity);
   }
   function scopedStoreState(){
-    const state=store.publicState();if(!accountEnabled)return state;
-    const account=visibleIdentity();
-    return {...state,tasks:filterAccountTasks(state.tasks,account),notifications:filterAccountNotifications(state.notifications,store.tasks(),account)};
+    if (!accountEnabled) return store.publicState();
+    const account = visibleIdentity(), tasks = store.tasks();
+    // 先按账号选择，再裁剪日志和最近百条消息，避免其他账号的记录挤掉本账号的历史。
+    return store.publicState({ tasks: filterAccountTasks(tasks, account),
+      notifications: filterAccountNotifications(store.data.notifications, tasks, account) });
   }
   function claimExisting(overview){
     if(!accountEnabled||!identity||!overview?.pagination?.complete)return;
@@ -198,11 +204,20 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
       store.save();
     }
   }
-  function requireSession() {
+  function requireSession({rechecking=false}={}) {
     const session = adapters.autodl.sessionStatus?.();
     if (session?.state !== 'ready' || !session.browserOpen)
       fail('LOGIN_CHECK_REQUIRED', '请点击账号头像，打开专用浏览器并连接 AutoDL 后再操作', { status: 409 });
-    if(accountEnabled&&!identity)fail('LOGIN_CHECK_REQUIRED',accountError||'请在账号页检查连接，确认当前账号后再操作',{status:409});
+    if(accountEnabled&&(!identity || (accountError && !rechecking)))fail('LOGIN_CHECK_REQUIRED',accountError||'请在账号页检查连接，确认当前账号后再操作',{status:409});
+  }
+  async function walletRead(work) {
+    if (accountEnabled) requireSession();
+    const owner = identity?.ownerId;
+    const result = await work();
+    // 余额请求独立于浏览器锁，退出后即使保留了 Token，也不能再向旧页面返回金额。
+    if (accountEnabled && visibleIdentity()?.ownerId !== owner)
+      fail('LOGIN_CHECK_REQUIRED','余额查询期间账号连接已变化，请重新同步',{status:409});
+    return result;
   }
   async function browserWork(work, { waitMs = 0, verifyIdentity = true, verifyAfter = true } = {}) {
     // waitMs：允许等待引擎完成当前一轮检查（镜像菜单在单独标签页读取，可与监测任务交替进行）。
@@ -221,7 +236,7 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
     } finally { engine.busy=false; engine.wake(); }
   }
   const reading = new Map();
-  function browserRead(name, query, work, { waitMs = 0, afterRead, onError } = {}) {
+  function browserRead(name, query, work, { waitMs = 0, afterRead, onError, publishesSnapshot = false } = {}) {
     requireSession();
     const ownerId = identity?.ownerId ?? null, key = JSON.stringify([ownerId, name, query]);
     if (reading.has(key)) return reading.get(key);
@@ -233,8 +248,9 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
           // 等待页面锁期间可能完成账号切换，旧账号排队的请求不能转而读取新账号。
           if (accountEnabled && identity.ownerId !== ownerId)
             fail('LOGIN_CHECK_REQUIRED', '等待期间账号已变化，请重新同步当前账号', { status: 409 });
-          return work();
-        }, { waitMs });
+          // 看板自己发布可轮询的快照，把同一次身份后验放在发布之前。
+          return work(publishesSnapshot && accountEnabled ? connectIdentity : undefined);
+        }, { waitMs, verifyAfter: !publishesSnapshot });
         // 身份后验通过后再写本地目录和采样；多个调用者共享同一次副作用。
         afterRead?.(result);
         return result;
@@ -259,15 +275,11 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
   }
   async function readInstances(expectedModel = '') {
     requireSession();
-    try {
-      if (typeof adapters.autodl.instances !== 'function') fail('INSTANCES','当前适配器不支持实例同步');
-      const rows = await adapters.autodl.instances(expectedModel);
-      instanceSync = { instances: rows.map(publicInstance), checkedAt: Date.now(), error: null };
-      return rows;
-    } catch (error) {
-      instanceSync = { ...instanceSync, error: redact(messageOf(error)) };
-      throw error;
-    }
+    if (typeof adapters.autodl.instances !== 'function') fail('INSTANCES','当前适配器不支持实例同步');
+    return adapters.autodl.instances(expectedModel);
+  }
+  function publishInstances(rows) {
+    instanceSync = { instances: rows.map(publicInstance), checkedAt: Date.now(), error: null };
   }
   const ai = new AiAssistant(store, aiOptions);
   // 检查器不主动联网；启动页请求与手动检查共用缓存，当前版本始终来自本项目包信息。
@@ -338,6 +350,7 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
       if(url.pathname.startsWith('/api/')) {
         if(req.headers['x-local-token'] !== token) fail('TOKEN','本地访问令牌无效，请重新加载页面',{status:403});
         if(req.method === 'GET' && url.pathname === '/api/state') return json(res,200,{...scopedStoreState(),
+          scheduler:engine.schedulingState(),meta:{pollSeconds:POLL_SECONDS,maxExperimentSlots:MAX_EXPERIMENT_SLOTS},
           account:{enabled:accountEnabled,identity:visibleIdentity(),error:accountError,
             unclaimedCount:visibleIdentity()?store.tasks().filter(t=>t.config.provider==='autodl'&&!t.ownerId).length:0},
           browser:{status:adapters.autodl.lastStatus || '会话不可用',busy:engine.busy,
@@ -363,6 +376,10 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
         if (!ready && !['/api/updates/check','/api/server/stop'].includes(url.pathname)) fail('BUSY','正在恢复已保存的账号连接，请稍候。',{status:409});
         if (installing && !['/api/updates/check','/api/updates/install','/api/server/stop'].includes(url.pathname) && !/^\/api\/tasks\/[\w-]+\/(pause|cancel)$/.test(url.pathname))
           fail('UPDATING', '正在准备更新，请等待完成后再修改配置或连接账号；原任务可暂停或停止。', { status: 409 });
+        if (url.pathname === '/api/scheduler') {
+          // 这是本机工作台的调度偏好，和单个账号的任务配置分开保存。
+          return json(res,200,{scheduler:engine.setSchedulingMode(data.mode,data.maxParallel)});
+        }
         if (url.pathname === '/api/updates/install') {
           beginInstall(updates.publicState());
           return json(res,202,{installation:installationState()});
@@ -375,12 +392,12 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
         if(url.pathname === '/api/observatory/overview') {
           if(data.targetId !== undefined && (typeof data.targetId !== 'string' || data.targetId.length > 100))fail('TARGET','监控实例 ID 无效');
           const query={targetId:data.targetId||''};
-          const overview=await browserRead('overview',query,()=>observatory.refreshOverview(query),{afterRead:claimExisting});
+          const overview=await browserRead('overview',query,verify=>observatory.refreshOverview(query,verify),{afterRead:claimExisting,publishesSnapshot:true});
           return json(res,200,{overview});
         }
         if(url.pathname === '/api/observatory/billing') {
           const query={days:35};
-          const billing=await browserRead('billing',query,()=>observatory.refreshBilling(query));
+          const billing=await browserRead('billing',query,verify=>observatory.refreshBilling(query,verify),{publishesSnapshot:true});
           return json(res,200,{billing});
         }
         // 正常停止本地后台：等待当前页面操作结束、保存状态、关闭专用浏览器。不关闭云端实例。
@@ -432,35 +449,37 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
               path.push(pick.label);
             }
             return { path, complete: path.length === 4, levels, checkedAt: Date.now() };
-          },{waitMs:imageBusyWaitMs}));
+          },{waitMs:browserWaitMs}));
         }
         if(url.pathname === '/api/wallet/token') {
-          if(accountEnabled)requireSession();
-          wallet.setToken(data.token,{rememberToken:data.rememberToken ?? false}); await wallet.refresh({force:true});
+          await walletRead(()=>{
+            wallet.setToken(data.token,{rememberToken:data.rememberToken ?? false});
+            return wallet.refresh({force:true});
+          });
           return json(res,200,{ok:true,wallet:wallet.publicState()});
         }
         if(url.pathname === '/api/wallet/clear-token') { if(accountEnabled)requireSession();wallet.clearToken(); return json(res,200,{ok:true,wallet:wallet.publicState()}); }
-        if(url.pathname === '/api/wallet/refresh') { if(accountEnabled)requireSession();await wallet.refresh({force:true}); return json(res,200,{wallet:wallet.publicState()}); }
+        if(url.pathname === '/api/wallet/refresh') { await walletRead(()=>wallet.refresh({force:true})); return json(res,200,{wallet:wallet.publicState()}); }
         if(url.pathname === '/api/wallet/preflight') {
           if(accountEnabled)requireSession();
           const config=normalizeConfig({...data,action:'observe',paidConsent:false});
           if(officialPricing(config) && (!pricePreview?.quote || pricePreview.configKey!==pricingKey(config) || Date.now()-pricePreview.checkedAt>QUOTE_MAX_AGE))
             fail('PRICE_REQUIRED','请先读取当前配置的官方报价，再预检余额；过期或无库存时不会用固定价格估算',{status:409});
-          return json(res,200,{check:await wallet.check(config,officialPricing(config)?pricePreview.quote:null,{force:true}),wallet:wallet.publicState()});
+          return json(res,200,{check:await walletRead(()=>wallet.check(config,officialPricing(config)?pricePreview.quote:null,{force:true})),wallet:wallet.publicState()});
         }
         if(url.pathname === '/api/autodl/images') {
           const prefix = normalizeImagePrefix(data.prefix);
           return json(res,200,await browserRead('images',prefix,async()=>{
             if(typeof adapters.autodl.imageOptions !== 'function')fail('IMAGES','当前适配器不支持官方基础镜像同步，请更新后台');
             return adapters.autodl.imageOptions(prefix);
-          },{waitMs:imageBusyWaitMs}));
+          },{waitMs:browserWaitMs}));
         }
         // 从 AutoDL 只读接口按地区同步官方 GPU 型号；保存本次快照，后续刷新重新读取。
         if(url.pathname === '/api/autodl/gpus') {
           const catalog = await browserRead('gpus',REGIONS,async()=>{
             if(typeof adapters.autodl.gpuCatalog !== 'function')fail('GPU_CATALOG','当前后台不支持同步 AutoDL 型号，请重启后台加载新版代码');
             return normalizeGpuCatalog(await adapters.autodl.gpuCatalog(REGIONS));
-          },{waitMs:imageBusyWaitMs,afterRead:catalog=>{
+          },{waitMs:browserWaitMs,afterRead:catalog=>{
             // 一个型号都没读到时不覆盖上次保存的目录。
             if(!catalogModelCount(catalog)) fail('GPU_CATALOG','没有从 AutoDL 创建页读到任何 GPU 型号：'+((catalog?.regions||[]).map(row=>row.region+(row.error?'（'+row.error+'）':row.missing?'（页面没有此地区）':row.disabled?'（地区不可选）':'（无型号）')).join('、')||'页面没有可读取的地区')+'。上次同步的型号已保留，请检查专用浏览器页面后重试',{status:502});
             store.data.gpuCatalog = catalog;if(identity)store.data.gpuCatalogOwnerId=identity.ownerId;store.save();market.record(catalog);
@@ -477,8 +496,8 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
         }
         if(url.pathname === '/api/pricing/preview') {
           const config=normalizeConfig({...data,action:'observe',paidConsent:false});
-          const work=async()=>{pricePreview=null;requireSession();pricePreview=await previewPricing(adapters.autodl,config);return pricePreview;};
-          return json(res,200,await browserWork(work));
+          pricePreview=await browserWork(()=>{pricePreview=null;requireSession();return previewPricing(adapters.autodl,config);});
+          return json(res,200,pricePreview);
         }
         if(url.pathname === '/api/browser/logout') {
           if(data.clearCredentials!==undefined && typeof data.clearCredentials!=='boolean')fail('CONFIG','清除凭据选项必须为布尔值');
@@ -497,19 +516,38 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
           return json(res,200,result);
         }
         if(url.pathname === '/api/autodl/instances') {
-          await browserWork(()=>readInstances());
+          const owner = visibleIdentity()?.ownerId;
+          try { publishInstances(await browserWork(()=>readInstances())); }
+          catch (error) {
+            if(error.code!=='BUSY' && (!accountEnabled || (owner && owner===visibleIdentity()?.ownerId)))
+              instanceSync={...instanceSync,error:redact(messageOf(error))};
+            throw error;
+          }
           return json(res,200,instanceSync);
         }
         if(url.pathname === '/api/tasks') {
           const config = normalizeConfig(data), replaceTaskId = data.replaceTaskId ?? null;
           if (replaceTaskId !== null && (typeof replaceTaskId !== 'string' || !/^[\w-]{1,80}$/.test(replaceTaskId)))
             fail('CONFIG', '替换任务 ID 无效');
+          requireSession();
+          const requestedOwner = visibleIdentity()?.ownerId;
+          // 页面仍显示旧账号时，必须重新确认才能为刚切换的账号建立任务；旧客户端可省略该字段。
+          if(accountEnabled && data.expectedOwnerId !== undefined && data.expectedOwnerId !== requestedOwner)
+            fail('TASK_CHANGED','任务配置所属账号已变化，请在当前账号重新确认',{status:409});
+          // 等当前检查交还页面，再受理新增任务；等待中断、换号或开始更新时不创建。
+          const checkRequest = () => {
+            if(res.destroyed || installing || engine.stopping) fail('TASK_CHANGED','本次创建已中断，请重新确认',{status:409});
+            if(accountEnabled && visibleIdentity()?.ownerId !== requestedOwner)
+              fail('TASK_CHANGED','等待期间账号已变化，请在当前账号重新确认',{status:409});
+          };
           const create = async () => {
             requireSession();
+            checkRequest();
             if(store.tasks().length>=500) fail('LIMIT','任务数量已达500，请备份状态并更换运行目录');
             checkTaskSlot(config, replaceTaskId);
+            let rows;
             if (config.provider === 'autodl' && ['clone', 'boot'].includes(config.mode)) {
-              const rows=await readInstances(config.gpuModel);
+              rows=await readInstances(config.gpuModel);
               const source = rows.find(i=>i.id===config.sourceId);
               // 已有实例按原配置开机，创建任务前重新读取账号实例，避免使用过期选择。
               if (config.mode === 'boot') validateBootSource(config, source);
@@ -533,11 +571,13 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
             }
             // 查询结束后先复核账号，再原子落盘；写入成功后不因额外身份请求失败而误报创建失败。
             if(accountEnabled)await connectIdentity();
+            checkRequest();
+            if(rows)publishInstances(rows);
             // 源实例/余额查询期间可能有暂停或恢复请求；落盘前再次校验旧任务状态。
             const replaces = checkTaskSlot(config, replaceTaskId);
             return store.create(config, { balanceCheck, replaces,ownerId:identity?.ownerId });
           };
-          const task=await browserWork(create,{verifyAfter:false});
+          const task=await browserWork(create,{waitMs:browserWaitMs,verifyAfter:false});
           return json(res,201,{task});
         }
         if(url.pathname === '/api/notifications/settings') {
@@ -557,7 +597,7 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
         }
         if(url.pathname === '/api/notifications/read') {
           const visible=accountEnabled?filterAccountNotifications(store.data.notifications,store.tasks(),visibleIdentity()):store.data.notifications;
-          visible.forEach(n=>n.read=true);store.save();return json(res,200,{ok:true});
+          store.markNotificationsRead(visible);return json(res,200,{ok:true});
         }
         if(['/api/browser/open','/api/browser/check'].includes(url.pathname)) {
           if(engine.busy || engine.stopping) fail('BUSY','正在执行页面操作，请稍后重试；如持续忙碌，请先暂停真实任务，不会打断正在进行的提交',{status:409});
@@ -627,7 +667,8 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
         if (checked.session?.state !== 'ready') throw new Error('已保存的登录已失效，请在账号页重新连接后恢复任务。');
         const actual = await adapters.autodl.readIdentity();
         if (actual.ownerId !== store.data.accountOwnerId) throw new Error('已保存会话的账号与原任务不一致，请重新连接原账号。');
-        await connectIdentity();
+        // 恢复沿用刚与磁盘匹配的身份；再次查询可能切到另一个账号并清掉原账号凭据。
+        identity = actual;
       } catch (error) {
         accountError = redact(messageOf(error)); pauseAccountTasks();
       }

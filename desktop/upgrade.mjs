@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { compareVersions } from '../src/updates.mjs';
+import { withUpgradeStage } from '../src/upgrade.mjs';
 
 const execute = promisify(execFile);
 const pointerPath = userData => path.join(userData, 'active-desktop.json');
@@ -26,41 +27,41 @@ export async function prepareDesktopUpdate({ release, userData, runtimeDir = pat
   const expected = `https://github.com/Starry-cz/autodl-assistant/releases/download/v${version}/autodl-assistant-desktop-${version}-win-x64.zip`;
   if (compareVersions(version, release.currentVersion) !== 1 || release.downloads?.desktopPortable !== expected) throw new Error('未找到可安装的正式桌面新版');
   const updatesDir = path.join(userData, 'updates');
-  fs.mkdirSync(updatesDir, { recursive: true });
   writeResult({ userData, runtimeDir, version }, 'preparing');
   // 独立目录避免失败下载覆盖正在运行的版本，也允许网络恢复后重新尝试。
-  const stage = fs.mkdtempSync(path.join(updatesDir, 'desktop-' + version + '-'));
-  const archive = path.join(stage, 'desktop.zip'), target = path.join(stage, 'app');
-  report({ status: 'preparing', phase: 'download', message: '正在下载完整桌面更新包…', targetVersion: version });
-  const response = await fetchImpl(expected, { signal: AbortSignal.timeout(15 * 60 * 1000) });
-  if (!response.ok || !response.body) throw new Error('桌面更新包下载失败：HTTP ' + response.status);
-  const size = Number(response.headers.get('content-length'));
-  let received = 0, lastPercent = -1;
-  await pipeline(Readable.fromWeb(response.body), new Transform({ transform(chunk, _encoding, callback) {
-    received += chunk.length;
-    const percent = size > 0 ? Math.min(100, Math.floor(received / size * 20) * 5) : null;
-    if (percent !== null && percent !== lastPercent) {
-      lastPercent = percent;
-      report({ status: 'preparing', phase: 'download', message: `正在下载桌面更新包 ${percent}%`, targetVersion: version });
-    }
-    callback(null, chunk);
-  } }), fs.createWriteStream(archive, { flags: 'wx' }));
-  report({ status: 'preparing', phase: 'prepare', message: '正在解压并检查新版运行环境…', targetVersion: version });
-  // 仅对解压子进程放开脚本策略，使 Windows 默认 Restricted 下也能加载内置 Archive 模块。
-  await run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath $env:AUTODL_UPDATE_ARCHIVE -DestinationPath $env:AUTODL_UPDATE_TARGET"], {
-    windowsHide: true, env: { ...process.env, AUTODL_UPDATE_ARCHIVE: archive, AUTODL_UPDATE_TARGET: target }, timeout: 300000,
+  return withUpgradeStage(updatesDir, 'desktop-' + version + '-', async stage => {
+    const archive = path.join(stage, 'desktop.zip'), target = path.join(stage, 'app');
+    report({ status: 'preparing', phase: 'download', message: '正在下载完整桌面更新包…', targetVersion: version });
+    const response = await fetchImpl(expected, { signal: AbortSignal.timeout(15 * 60 * 1000) });
+    if (!response.ok || !response.body) throw new Error('桌面更新包下载失败：HTTP ' + response.status);
+    const size = Number(response.headers.get('content-length'));
+    let received = 0, lastPercent = -1;
+    await pipeline(Readable.fromWeb(response.body), new Transform({ transform(chunk, _encoding, callback) {
+      received += chunk.length;
+      const percent = size > 0 ? Math.min(100, Math.floor(received / size * 20) * 5) : null;
+      if (percent !== null && percent !== lastPercent) {
+        lastPercent = percent;
+        report({ status: 'preparing', phase: 'download', message: `正在下载桌面更新包 ${percent}%`, targetVersion: version });
+      }
+      callback(null, chunk);
+    } }), fs.createWriteStream(archive, { flags: 'wx' }));
+    report({ status: 'preparing', phase: 'prepare', message: '正在解压并检查新版运行环境…', targetVersion: version });
+    // 仅对解压子进程放开脚本策略，使 Windows 默认 Restricted 下也能加载内置 Archive 模块。
+    await run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath $env:AUTODL_UPDATE_ARCHIVE -DestinationPath $env:AUTODL_UPDATE_TARGET"], {
+      windowsHide: true, env: { ...process.env, AUTODL_UPDATE_ARCHIVE: archive, AUTODL_UPDATE_TARGET: target }, timeout: 300000,
+    });
+    const appRoot = path.join(target, 'resources', 'app'), executable = path.join(target, 'AutoDL Assistant.exe');
+    const info = JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'));
+    if (info.name !== 'autodl-gpu-watch' || info.version !== version || !fs.existsSync(executable)) throw new Error('桌面更新包结构或版本不匹配');
+    // 用新版自带 Node 加载后端和 Playwright，确认环境完整；不会创建服务、读取账号或运行任务。
+    await run(executable, ['--input-type=module', '-e', "import {pathToFileURL} from 'node:url'; import fs from 'node:fs'; await import(pathToFileURL(process.cwd()+'/src/server.mjs')); const {chromium}=await import('playwright'); if(!fs.existsSync(chromium.executablePath()))throw Error('内置浏览器缺失');"], {
+      cwd: appRoot, windowsHide: true, timeout: 30000,
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', PLAYWRIGHT_BROWSERS_PATH: path.join(target, 'resources', 'browsers') },
+    });
+    // 已解压并通过环境检查，原压缩包不再参与交接；保留旧程序及完整新版目录。
+    fs.unlinkSync(archive);
+    return { version, executable, stage };
   });
-  const appRoot = path.join(target, 'resources', 'app'), executable = path.join(target, 'AutoDL Assistant.exe');
-  const info = JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'));
-  if (info.name !== 'autodl-gpu-watch' || info.version !== version || !fs.existsSync(executable)) throw new Error('桌面更新包结构或版本不匹配');
-  // 用新版自带 Node 加载后端和 Playwright，确认环境完整；不会创建服务、读取账号或运行任务。
-  await run(executable, ['--input-type=module', '-e', "import {pathToFileURL} from 'node:url'; import fs from 'node:fs'; await import(pathToFileURL(process.cwd()+'/src/server.mjs')); const {chromium}=await import('playwright'); if(!fs.existsSync(chromium.executablePath()))throw Error('内置浏览器缺失');"], {
-    cwd: appRoot, windowsHide: true, timeout: 30000,
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', PLAYWRIGHT_BROWSERS_PATH: path.join(target, 'resources', 'browsers') },
-  });
-  // 已解压并通过环境检查，原压缩包不再参与交接；保留旧程序及完整新版目录。
-  fs.unlinkSync(archive);
-  return { version, executable, stage };
 }
 
 // 旧快捷方式仍启动原 EXE；入口只转发到已通过健康检查且版本更高的缓存程序。

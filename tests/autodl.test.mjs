@@ -15,12 +15,13 @@ test('差集候选必须同时匹配地区、精确型号、数量、目标主�
 test('受理导航有证据且唯一精确新增目标才自动绑定',async()=>{
   const a=adapter(),t=makeTask();a.instances=async()=>[instance()];const result=await a.reconcile(t);assert.equal(result.receipt.instanceId,'synthetic-newtarget');assert.equal(result.instance.gpuVerified,true);
 });
-test('点击结果不明：点击2分钟内等待；之后目标主机恰好一个新实例自动绑定，没有新实例确认未创建，其余交给用户核对',async()=>{
+test('点击结果不明：点击2分钟内等待；之后唯一匹配才绑定，重复读取空列表仍待核对',async()=>{
   const a=adapter(),t=makeTask();t.operation.stage='click_started';t.operation.receipt=null;t.operation.at=Date.now();a.rejectRecheckMs=0;
   a.instances=async()=>[instance()];assert.equal((await a.reconcile(t)).pending,true);
   t.operation.at=Date.now()-3*60000;
   const bound=await a.reconcile(t);assert.equal(bound.receipt.instanceId,'synthetic-newtarget');assert.equal(bound.instance.gpuVerified,true);assert.equal(bound.receipt.acceptedAt,t.operation.at);
-  let reads=0;a.instances=async()=>{reads++;return [];};assert.equal((await a.reconcile(t)).notCreated,true);assert.equal(reads,2);
+  let reads=0;a.instances=async()=>{reads++;return [];};const absent=await a.reconcile(t);
+  assert.equal(absent.ambiguous,true);assert.equal(absent.notCreated,undefined);assert.match(absent.reason,/保留本次提交/);assert.equal(reads,2);
   a.instances=async()=>[instance(),instance({id:'synthetic-newsecond'})];assert.equal((await a.reconcile(t)).ambiguous,true);
   a.instances=async()=>[instance({id:'synthetic-otherhost',hostNumber:'合成923机'})];const other=await a.reconcile(t);assert.equal(other.ambiguous,true);assert.match(other.reason,/synthetic-otherhost/);
 });

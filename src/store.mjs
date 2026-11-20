@@ -86,23 +86,58 @@ export class Store {
     }
     return task;
   }
-  patch(task, patch) { Object.assign(task, patch, { updatedAt: this.clock() }); this.save(); }
+  patch(task, patch) {
+    const previous = { ...task };
+    Object.assign(task, patch, { updatedAt: this.clock() });
+    try { this.save(); }
+    catch (error) {
+      // 普通修改失败后仍以已保存状态为准，避免下次无关写盘意外提交此次修改。
+      for (const key of Object.keys(patch)) if (!Object.hasOwn(previous, key)) delete task[key];
+      Object.assign(task, previous);
+      // 点击边界与平台回执是去重证据。一旦出现就留给引擎核对，不能因磁盘故障再点一次。
+      if (patch.operation?.stage === 'click_started' || patch.operation?.stage === 'accepted') task.operation = patch.operation;
+      if (patch.state === 'paused' || patch.state === 'cancelled') {
+        // 停止指令优先；即使无法保存，当前进程也不能因为回滚继续下单。
+        task.state = patch.state;
+        const action = patch.state === 'paused' ? '暂停' : '取消';
+        throw new Error(`本次运行已${action}任务，但状态尚未保存。重启可能恢复旧状态，请检查磁盘空间及写入权限。`, { cause: error });
+      }
+      throw error;
+    }
+  }
   log(task, level, message, details) {
-    task.logs.push({ at: this.clock(), level, message, ...(details ? { details } : {}) });
-    task.logs = task.logs.slice(-200); task.updatedAt = this.clock(); this.save();
+    const entry = { at: this.clock(), level, message, ...(details ? { details } : {}) };
+    this.patch(task, { logs: [...task.logs.slice(-199), entry] });
   }
   enqueueNotification(task, event, message) {
     const key = `${task.id}:${task.notifyEpoch || 0}:${event}`;
     if (this.data.notifications.some(n => n.key === key)) return;
     this.data.notifications.push({ id: randomUUID(), key, taskId: task.id, event, name: task.config.name,
       message, at: this.clock(), deliveries: {}, attempts: 0, nextAttemptAt: this.clock(), read: false });
-    this.save();
+    // 入队失败须释放去重键，下次重试才能真正保存这条通知。
+    try { this.save(); }
+    catch (error) { this.data.notifications.pop(); throw error; }
   }
-  publicState() {
+  markNotificationsRead(notifications) {
+    const unread = notifications.filter(item => !item.read);
+    if (!unread.length) return;
+    for (const item of unread) item.read = true;
+    try { this.save(); }
+    catch (error) {
+      // 只回滚本次改变的消息；之前已读的和其他账号的记录保持原样。
+      for (const item of unread) item.read = false;
+      throw error;
+    }
+  }
+  publicState({ tasks = this.data.tasks.filter(t => t.config.provider === 'autodl'), notifications } = {}) {
+    if (!notifications) {
+      const legacyIds = new Set(this.data.tasks.filter(t => t.config.provider !== 'autodl').map(t => t.id));
+      notifications = this.data.notifications.filter(item => !legacyIds.has(item.taskId));
+    }
     return {
       notificationSettingsRevision: this.data.notificationSettingsRevision ?? 0,
-      tasks: this.data.tasks.filter(t=>t.config.provider==='autodl').map(t => ({ ...t, logs: t.logs.slice(-80) })),
-      notifications: this.data.notifications.filter(n=>!this.data.tasks.some(t=>t.id===n.taskId && t.config.provider!=='autodl')).slice(-100).reverse().map(({ deliveries, ...n }) => ({ ...n, deliveries })),
+      tasks: tasks.map(t => ({ ...t, logs: t.logs.slice(-80) })),
+      notifications: notifications.slice(-100).reverse().map(n => ({ ...n })),
       settings: { ...this.data.settings,
         webhookUrl: this.data.settings.webhookUrl ? '***' : '',
         webhookToken: this.data.settings.webhookToken ? '***' : '',

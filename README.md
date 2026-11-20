@@ -32,12 +32,12 @@
 
 - **系统：**Windows 10/11 x64。连接 AutoDL 需要联网，本机无需独立显卡。
 - **环境：**上述方式均无需提前安装 Node.js、npm 或 Git。网页版会按需下载运行环境和浏览器组件。
-- **下载版本：**本文链接对应 [v2.1.0 正式版](https://github.com/Starry-cz/autodl-assistant/releases/tag/v2.1.0)。
+- **下载版本：**本文链接对应 [v2.2.0 正式版](https://github.com/Starry-cz/autodl-assistant/releases/tag/v2.2.0)。
 
 <a id="method-1"></a>
 ### 1. EXE 安装包
 
-1. [下载桌面安装包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.1.0/autodl-assistant-desktop-2.1.0-setup-x64.exe)。文件名以 **setup-x64.exe** 结尾。
+1. [下载桌面安装包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.2.0/autodl-assistant-desktop-2.2.0-setup-x64.exe)。文件名以 **setup-x64.exe** 结尾。
 2. 双击 EXE，等待安装完成。程序安装到当前 Windows 用户，无需管理员权限。
 3. 打开桌面或开始菜单中的 **AutoDL助手桌面版**，按[开始使用](#first-use)连接账号。
 4. **以后启动：**打开 **AutoDL助手桌面版** 快捷方式。
@@ -48,7 +48,7 @@
 <a id="method-2"></a>
 ### 2. 便携 ZIP
 
-1. [下载完整便携包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.1.0/autodl-assistant-desktop-2.1.0-win-x64.zip)。文件名以 **win-x64.zip** 结尾。
+1. [下载完整便携包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.2.0/autodl-assistant-desktop-2.2.0-win-x64.zip)。文件名以 **win-x64.zip** 结尾。
 2. 右键 ZIP，选择 **全部解压**，保存到有写入权限的固定文件夹。
 3. 打开解压后的文件夹，双击 **AutoDL Assistant.exe**，按[开始使用](#first-use)连接账号。
 4. **以后启动：**打开该文件夹中的 **AutoDL Assistant.exe**，也可为它创建桌面快捷方式。
@@ -59,7 +59,7 @@
 <a id="method-3"></a>
 ### 3. 源码 ZIP
 
-1. [下载完整源码包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.1.0/autodl-assistant-v2.1.0.zip)。
+1. [下载完整源码包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.2.0/autodl-assistant-v2.2.0.zip)。
 2. 右键 ZIP，选择 **全部解压**，保存到有写入权限的固定目录，例如 `D:\AutoDL助手`。
 3. 打开项目文件夹，找到 **启动抢卡助手.cmd**；同一层应有 `package.json`、`public`、`src` 和 `scripts`。
 4. 双击 **启动抢卡助手.cmd**。保持联网，等待环境准备完成并显示“启动成功”。
@@ -72,7 +72,7 @@
 <a id="method-4"></a>
 ### 4. 单文件在线安装
 
-1. [下载在线安装文件](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.1.0/autodl-assistant-setup.cmd)：**autodl-assistant-setup.cmd**。
+1. [下载在线安装文件](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.2.0/autodl-assistant-setup.cmd)：**autodl-assistant-setup.cmd**。
 2. 双击该文件并保持联网，等待程序与运行环境下载完成。
 3. 默认安装到 `%LOCALAPPDATA%\AutoDL-Assistant`。将此路径粘贴到资源管理器地址栏即可打开安装目录。
 4. 出现“安装和启动完成”后，浏览器会打开助手页面，按[开始使用](#first-use)连接账号。
@@ -88,7 +88,7 @@
 2. 复制下面的命令到 PowerShell，按回车下载安装脚本：
 
    ```powershell
-   Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Starry-cz/autodl-assistant/v2.1.0/install.ps1" -OutFile "$env:TEMP\install-autodl.ps1"
+   Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Starry-cz/autodl-assistant/v2.2.0/install.ps1" -OutFile "$env:TEMP\install-autodl.ps1"
    ```
 
 3. 下载完成后，执行第二条命令：
@@ -140,7 +140,15 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\install-autod
 
 新租和克隆按提交时的 AutoDL 报价计费，费用预览不锁价。克隆的数据复制有单独的进度，GPU 开机后仍需确认复制状态。
 
-**同时等待多台实例**时，可以为不同源实例分别创建任务，后台按到期时间轮流检查。若只想为一个源实例抢到一台，请用「原实例开机或同区克隆」。已有单独开机任务时，先暂停，核实尚未提交后再用组合配置替换。开机或克隆的提交结果待核对时，助手会保留记录。
+**三个实验各用一台单卡实例**时，在「新租服务器」中选择 GPU 型号，把每台的 GPU 数量设为 **1**。使用相同配置，分别选 **实验 1、实验 2、实验 3**，逐个创建任务。选择「自动执行」时每项都需确认费用，每台成功开机后单独计费。「仅提醒」会在找到资源时通知你。把 GPU 数量设为 **3** 则是申请一台三卡实例。
+
+**多任务调度**在抢卡控制台的任务队列中设置，对本机工作台生效，重启后沿用。
+
+- **串行**（默认）按到期顺序逐个检查。
+- **并行**可选择同时查 2 项或 3 项库存。选 2 项也能运行三个实验任务，第三项在有空位时加入。先发现候选的任务可以先进入复核，开机、创建和克隆仍逐个提交。同规格任务若有待确认的订单，助手会先核对其归属。
+- **检查间隔**默认 10 秒，可以选 3 秒、5 秒或手动输入 1–600 秒。页面读取、排队和平台限流都会影响实际检查时间。
+
+只想为同一个源实例抢到一台时，选择「原实例开机或同区克隆」。已有单独开机任务时，先暂停并核实尚未提交，再用组合配置替换。提交结果待核对时，助手会保留记录。
 
 组合策略支持仅提醒。自动执行时，原机开机沿用原计费方式，克隆会创建新的计费实例并保留原实例。需要余额保护时，请使用单独的克隆任务。
 

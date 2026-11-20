@@ -64,7 +64,10 @@
     <section class="panel composer"><div class="panel-heading"><h2>任务配置</h2></div>
       <div class="mode-tabs" role="tablist" aria-label="任务模式"><button type="button" class="mode active" data-mode="create" role="tab" aria-selected="true">新租服务器</button><button type="button" class="mode" data-mode="boot" role="tab" aria-selected="false">已有实例开机</button><button type="button" class="mode" data-mode="clone" role="tab" aria-selected="false">迁移克隆</button></div>
       <form id="task-form"><div class="config-fields">
-        <label>任务名称 <span class="optional-tag">可选</span><input name="name" placeholder="例如：今晚训练" maxlength="80"></label>
+        <div class="field-grid task-identity">
+          <label>任务名称 <span class="optional-tag">可选</span><input name="name" placeholder="例如：今晚训练" maxlength="80"></label>
+          <label id="experiment-slot-field" hidden>实验编号<select name="experimentSlot" title="同型号需要多台时，每个实验分别建立一条任务。" disabled><option value="1">实验 1</option><option value="2">实验 2</option><option value="3">实验 3</option></select></label>
+        </div>
         <!-- 隐藏下拉框继续提供原有表单值，选择卡只改变 observe / execute。 -->
         <select name="action" hidden tabindex="-1" aria-hidden="true"><option value="execute" selected>自动创建并开机</option><option value="observe">只通知，停在提交之前</option></select>
         <fieldset class="action-field"><legend>执行方式</legend><div id="action-choices" class="action-choices">
@@ -101,7 +104,15 @@
             </div>
 
         <div class="section-title"><span>运行设置</span><button type="button" class="info-button" aria-label="后台运行说明" data-help="关闭网页后任务继续；电脑休眠或本地服务退出会停止监测。"><span aria-hidden="true">i</span></button></div>
-        <div class="field-grid"><label>检查间隔 <span class="unit">秒</span><input name="pollSeconds" type="number" min="10" max="600" step="1" value="10" required aria-describedby="poll-hint"></label><label>最长监测 <span class="unit">分钟</span><input name="timeoutMinutes" type="number" min="1" max="10080" value="1440" required></label></div>
+        <div class="field-grid">
+          <div class="poll-field">
+            <label for="poll-seconds">检查间隔 <span class="unit" id="poll-unit">秒</span></label>
+            <input id="poll-seconds" name="pollSeconds" type="number" min="10" max="600" step="1" value="10" required aria-describedby="poll-range">
+            <div class="poll-presets" id="poll-presets" role="group" aria-label="常用检查间隔" hidden></div>
+            <span id="poll-range" class="visually-hidden">网络、任务排队或出错重试可能延长实际间隔。</span>
+          </div>
+          <label>最长监测 <span class="unit">分钟</span><input name="timeoutMinutes" type="number" min="1" max="10080" value="1440" required aria-describedby="poll-hint"></label>
+        </div>
         <p id="poll-hint" class="hint">到期停止监测，不会关闭云端实例。</p>
 
         <div id="pricing-fields"><details id="pricing-options" class="option-group"><summary><span id="pricing-heading">费用预览</span></summary><div class="option-body">
@@ -128,7 +139,15 @@
             <p id="task-footnote" class="form-footnote">成功后自动结束监测。</p>
           </div></form>
     </section>
-    <div class="task-column"><section class="panel queue-panel" id="queue-panel"><div class="panel-heading"><div><h2>任务队列 <span id="task-count" class="count">0</span></h2><p id="queue-summary" hidden></p></div><div class="queue-tools"><span class="live-indicator"><i class="online-dot"></i>自动刷新</span><button id="toggle-queue" type="button" class="text-button" aria-controls="tasks" aria-expanded="true">收起</button></div></div><div id="tasks" class="tasks"></div></section></div>
+    <div class="task-column"><section class="panel queue-panel" id="queue-panel"><div class="panel-heading"><div><h2>任务队列 <span id="task-count" class="count">0</span></h2><p id="queue-summary" hidden></p></div><div class="queue-tools"><span class="live-indicator"><i class="online-dot"></i>自动刷新</span><button id="toggle-queue" type="button" class="text-button" aria-controls="tasks" aria-expanded="true">收起</button></div></div>
+      <div class="scheduler-settings">
+        <span class="scheduler-field"><label for="scheduler-mode">任务调度</label>
+        <select id="scheduler-mode" aria-describedby="scheduler-status" title="切换仅影响后续调度，进行中的操作继续完成。独立任务可能分别计费。" disabled><option value="" hidden>暂不可用</option><option value="serial">串行</option><option value="parallel">并行</option></select></span>
+        <span class="scheduler-field" id="scheduler-limit-field" hidden><label for="scheduler-limit">同时查库存</label>
+        <select id="scheduler-limit" aria-describedby="scheduler-status" disabled><option value="2">2 项任务</option><option value="3">3 项任务</option></select></span>
+        <span id="scheduler-status" role="status">正在读取…</span>
+      </div>
+      <div id="tasks" class="tasks"></div></section></div>
   </div>
 </section>
 <!-- 登录操作集中在账号页，原有登录与状态元素 ID 保持不变。 -->

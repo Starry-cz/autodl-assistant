@@ -69,18 +69,19 @@ export function normalizeObservatoryWallet(row) {
 }
 
 // 逐页读取并按真实主键去重；首个请求失败直接报错，后续未读完则保留已有数据并明确标为不完整。
-export async function collectObservatoryPages(readPage, { pageSize, maxPages = 20 } = {}) {
+export async function collectObservatoryPages(readPage, { pageSize, maxPages = 20, strict = false } = {}) {
   const rows = [], seen = new Set();
   let total = null, pages = 0, changed = false, duplicates = false, reason = null, complete = false;
   for (let pageIndex = 1; pageIndex <= maxPages; pageIndex++) {
     let page;
     try { page = await readPage({ pageIndex, pageSize }); }
     catch (error) {
-      if (!pages || isAuth(error)) throw error;
+      // 任务预检需要原始失败进入退避；看板仍允许展示已读取的部分记录。
+      if (strict || !pages || isAuth(error)) throw error;
       reason = `第${pageIndex}页未读完；仅显示已读取的记录`; break;
     }
     if (!Array.isArray(page?.list)) {
-      if (!pages) throw new AppError('OBSERVATORY_SCHEMA', '只读列表缺少有效分页数据');
+      if (strict || !pages) throw new AppError('OBSERVATORY_SCHEMA', '只读列表缺少有效分页数据');
       reason = `第${pageIndex}页格式已变化；仅显示已读取的记录`; break;
     }
     pages++;
@@ -146,7 +147,7 @@ export class Observatory {
   constructor({ adapter, clock = () => Date.now() }) { this.adapter = adapter; this.clock = clock; this.clear(); }
   clear() { this.overview = null; this.billing = null; }
   publicState() { return { source: 'autodl-web', timeZone: OBSERVATORY_TIME_ZONE, overview: this.overview, billing: this.billing }; }
-  async refreshOverview({ targetId = '' } = {}) {
+  async refreshOverview({ targetId = '' } = {}, verifyAccount) {
     try {
       const { rows, pagination } = await collectObservatoryPages(options => this.adapter.observatoryInstances(options), { pageSize: 100 });
       let wallet = null, walletError = null, monitor = null, error = null;
@@ -166,6 +167,8 @@ export class Observatory {
         totalGPUs: hasStock ? target.gpu_all_num : null, machineFound: target ? text(target.machine_id) !== null : pagination.complete ? false : null,
         checkedAt, complete: hasStock, reason: hasStock ? null : !pagination.complete ? '实例列表尚未完整，不能确认原主机库存'
           : !target ? '完整实例列表未找到所选实例' : '实例列表未提供可确认的原主机空闲卡数' } : null;
+      // 轮询可在网络请求期间读取缓存。账号确认之前只保留局部结果。
+      if (verifyAccount) await verifyAccount();
       this.overview = { checkedAt, instances, summary: { total: instances.length, running: instances.filter(row => row.running === true).length,
         stopped: instances.filter(row => row.stopped === true).length, unknown: instances.filter(row => row.running === null).length },
         pagination, wallet, walletError, stock, error };
@@ -176,12 +179,13 @@ export class Observatory {
       throw error;
     }
   }
-  async refreshBilling({ days = OBSERVATORY_BILL_DAYS } = {}) {
+  async refreshBilling({ days = OBSERVATORY_BILL_DAYS } = {}, verifyAccount) {
     // 请求期间跨过上海午夜时仍按请求开始的日期范围统计，不把未查询的新一天补成零。
     const requestedAt = this.clock(), range = billingRange(requestedAt, days);
     try {
       const { rows, pagination } = await collectObservatoryPages(options => this.adapter.observatoryBills({
         ...options, dateFrom: range.dateFrom, dateTo: range.queryDateTo }), { pageSize: 500 });
+      if (verifyAccount) await verifyAccount();
       this.billing = { ...aggregateObservatoryBills(rows, pagination, { now: requestedAt, days }), checkedAt: this.clock() };
       return this.billing;
     } catch (error) {

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { _electron as electron, chromium } from 'playwright';
@@ -18,7 +18,8 @@ const sourceExecutable = packaged ? path.resolve(process.argv[2]) : require('ele
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autodl-desktop-check-'));
 // Playwright 启动内置浏览器会写依赖验证标记；打包验收必须运行独立副本，不改发布构建目录。
 const packagedCopy = path.join(dataDir, 'application');
-if (packaged) fs.cpSync(path.dirname(sourceExecutable), packagedCopy, { recursive: true });
+// 用异步复制兼容从 Windows 中文路径启动的 Node 22 验收环境。
+if (packaged) await fs.promises.cp(path.dirname(sourceExecutable), packagedCopy, { recursive: true });
 const executablePath = packaged ? path.join(packagedCopy, path.basename(sourceExecutable)) : sourceExecutable;
 const args = packaged ? [] : [root];
 const loader = path.join(path.dirname(require.resolve('playwright-core/package.json')), 'lib', 'server', 'electron', 'loader.js');
@@ -34,11 +35,19 @@ let desktop, nativeDesktop, nativeBase;
 const pass = label => { report.checks.push(label); console.log('PASS ' + label); };
 
 async function start() {
-  // 显式 EXE 路径会跳过 Playwright 的默认 loader；测试恢复同一 ready 握手，避免窗口早于调试连接创建。
-  const instance = await electron.launch({ executablePath, args: ['-r', loader, ...args], cwd: root, env, timeout: 60000, chromiumSandbox: true });
-  const page = await instance.firstWindow();
-  await page.locator('[data-view="overview"]').first().waitFor();
-  return { instance, page };
+  // 安装版不处理开发态的 -r 参数。在隔离副本的首个入口加载同一个 Playwright 握手模块。
+  const entry = path.join(packagedCopy, 'resources', 'app', 'desktop', 'main.mjs');
+  const original = packaged ? fs.readFileSync(entry) : null;
+  if (packaged) fs.writeFileSync(entry, Buffer.concat([Buffer.from('import '+JSON.stringify(pathToFileURL(loader).href)+';\n'), original]));
+  try {
+    const instance = await electron.launch({ executablePath, args: packaged ? [] : ['-r', loader, ...args], cwd: root, env, timeout: 60000, chromiumSandbox: true });
+    const page = await instance.firstWindow();
+    await page.locator('[data-view="overview"]').first().waitFor();
+    return { instance, page };
+  } finally {
+    // 单实例与原生重启验收均运行完整的原始程序，构建产物本身从未经修改。
+    if (packaged) fs.writeFileSync(entry, original);
+  }
 }
 async function quit(instance) {
   const closed = instance.waitForEvent('close', { timeout: 60000 });
@@ -208,4 +217,9 @@ try {
   if (desktop) await quit(desktop).catch(() => {});
   if (nativeDesktop && nativeDesktop.exitCode === null) await quitNative().catch(error => console.error('原生测试进程收尾失败：' + error.message));
   fs.writeFileSync(path.join(output, 'desktop-' + (packaged ? 'packaged' : 'dev') + '-report.json'), JSON.stringify(report, null, 2));
+  // 成功后移除本次验收复制的整套桌面程序，保留报告和诊断日志。
+  if (packaged && report.passed && path.dirname(path.resolve(dataDir)) === path.resolve(os.tmpdir())
+    && path.basename(dataDir).startsWith('autodl-desktop-check-') && path.dirname(path.resolve(packagedCopy)) === dataDir) {
+    await fs.promises.rm(packagedCopy, { recursive: true, force: true, maxRetries: 3 });
+  }
 }

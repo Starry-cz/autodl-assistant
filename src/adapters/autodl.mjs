@@ -10,6 +10,7 @@ import { readAutodlObservatory } from './autodl-observatory.mjs';
 import { readAutodlIdentity } from './autodl-account.mjs';
 import { catalogRegionHasNoStock, readGpuCatalogApi, readTaskGpuCatalogApi, readMarketHostsApi } from './autodl-inventory.mjs';
 import { resolveBrowserLaunchOptions } from '../browser.mjs';
+import { IsolatedTaskPrechecks } from './autodl-precheck.mjs';
 const BASE = 'https://www.autodl.com';
 const LIST = `${BASE}/console/instance/list`;
 const escaped = text => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -137,6 +138,7 @@ export class AutoDLBrowserAdapter {
     this.runtimeDir = path.resolve(runtimeDir);
     this.profileDir = path.join(this.runtimeDir, 'browser-profile');
     this.context = null; this.page = null; this.sessionPage = null; this.prepared = null; this.probed = null;
+    this.readonlyPrechecks = new IsolatedTaskPrechecks(this);
     this.browserMode = null;
     this.previouslyReady = false; this.checkboxTimeoutMs = 5000;
     // 点击“创建并开机”后的观察时长；按钮仍在加载时最多等到 clickLoadingMs。测试中可缩短。
@@ -200,7 +202,8 @@ export class AutoDLBrowserAdapter {
       });
     }
     // 镜像菜单、型号目录标签页只用于读取，不作为任务主页面。
-    const page = this.context.pages().find(p => !p.isClosed() && p !== this.imageTab && p !== this.catalogTab) || await this.context.newPage();
+    // 预检建页可能尚未导航，不能把临时 about:blank 读页面提升成付费工作页。
+    const page = (!this.readonlyPrechecks.active.size && this.context.pages().find(p => !p.isClosed() && p !== this.imageTab && p !== this.catalogTab)) || await this.context.newPage();
     this.page = page;
     page.setDefaultTimeout(12000); page.setDefaultNavigationTimeout(30000);
     page.on('close', () => {
@@ -326,6 +329,7 @@ export class AutoDLBrowserAdapter {
     }
   }
   async marketHosts(options) { return readMarketHostsApi(this, options); }
+  async isolatedPrecheck(task, options) { return this.readonlyPrechecks.run(task, options); }
   async checkPage() {
     const snapshot = await readSessionSnapshot(this.page);
     const state = classifySessionSnapshot(snapshot, { previouslyReady: this.previouslyReady });
@@ -717,14 +721,14 @@ export class AutoDLBrowserAdapter {
     fail('PAGE_LIMIT', '资源列表扫描达到保护上限，请检查页面翻页控件');
   }
   async collectHosts(region, options = {}) { return (await this.scanHosts(region, options)).hosts; }
-  async probe(t, { scope = 'full', skip = () => false } = {}) {
+  async probe(t, { scope = 'full', skip = () => false, precheck = null, catalogConcurrency = 2 } = {}) {
     this.prepared = null; this.probed = null;
     const started = Date.now(), firstPageOnly = scope === 'first-page';
     let catalogMs = 0;
-    if (t.config.mode === 'create') {
+    if (t.config.mode === 'create' && !this.readonlyPrechecks.canReuseCatalog(t, precheck)) {
       // 型号汇总只用于确认“所有目标地区空闲为零”；不足所需卡数、未知或缺项仍进入原主机精确扫描。
       // 请求失败直接交给引擎退避，不再额外导航 DOM 形成第二次请求；克隆保持原源实例校验流程。
-      const catalog = await this.taskGpuCatalog(t.config.regions, t.config.gpuModel);
+      const catalog = await this.taskGpuCatalog(t.config.regions, t.config.gpuModel, { parallelism: catalogConcurrency });
       catalogMs = Date.now() - started;
       // 预筛可能提前结束；只有全部所选地区均返回明确零库存时才不进入主机页面。
       const noStock = t.config.regions.every(region => catalogRegionHasNoStock(
@@ -885,7 +889,7 @@ export class AutoDLBrowserAdapter {
   }
   // 目录直接读取当前登录会话的只读接口；不导航或新建页面，任务提交仍走原表单核验。
   async gpuCatalog(regions, options) { return readGpuCatalogApi(this, regions, options); }
-  async taskGpuCatalog(regions, model) { return readTaskGpuCatalogApi(this, regions, model); }
+  async taskGpuCatalog(regions, model, options) { return readTaskGpuCatalogApi(this, regions, model, options); }
   async selectImage(c) {
     const cascader = await this.openImageMenu();
     await this.chooseImagePath(c.imagePath);
@@ -1097,13 +1101,15 @@ export class AutoDLBrowserAdapter {
     const outcome = await this.clickOutcome(formUrl), seconds = Math.round((outcome.waitedMs ?? this.clickOutcomeMs) / 1000);
     // 明确识别出的平台拒绝（失败提示、余额不足等弹窗、架构与 CUDA 不符）：立即两次核对实例列表，没有新实例就清除记录继续监测。
     const arch = outcome.kind === 'dialog' && ARCH_DIALOG.test(outcome.message);
-    const known = outcome.kind === 'rejected' || arch || outcome.kind === 'dialog' && STRONG_FAILURE_TEXT.test(outcome.message);
+    // 错误样式也会用于网络超时等提示；只有明确的业务拒绝能证明这次点击失败。
+    const known = arch || ['rejected', 'dialog'].includes(outcome.kind) && STRONG_FAILURE_TEXT.test(outcome.message);
     if (known) return this.confirmNotCreated(t, quote, outcome.message, { archBlocked: arch });
     // 其余情况（按钮仍在加载、没有识别出结果、未识别的弹窗）：请求可能仍在处理，保留提交记录，点击约 2 分钟后再读实例列表核对；
     // 不立即判定“未创建”，避免实例延迟出现时被当成未创建、下一轮又点一次而多租。
     if (outcome.kind !== 'accepted') {
       this.prepared = null;
       const seen = outcome.kind === 'dialog' ? '点击后出现未识别的弹窗：' + redact(outcome.message).slice(0, 80)
+        : outcome.kind === 'rejected' ? '点击后出现提示，但不能确认创建失败：' + redact(outcome.message).slice(0, 80)
         : outcome.busy ? '点击后 ' + seconds + ' 秒按钮仍在加载，平台可能仍在处理'
         : '点击后 ' + seconds + ' 秒内页面没有回到实例列表，也没有识别出失败提示' + (outcome.others?.length ? '（新出现：' + redact(outcome.others.join('；')).slice(0, 160) + '）' : '（页面上没有新出现的提示）');
       fail('SUBMIT_UNCLEAR', seen + '；保留提交记录，约 2 分钟后只读核对实例列表，任务不会再次创建');
@@ -1121,7 +1127,7 @@ export class AutoDLBrowserAdapter {
   }
   // 点击后的页面结果：回到实例列表=已受理；表单页新出现失败提示=平台拒绝；新弹窗或超时=不明。
   // 点击前用 markClickSignals 标记已显示的元素，之后只把新出现的当作本次结果。
-  markClickSignals() { return this.page.evaluate(clickSignals, ['mark', this.signalPatterns.failure, this.signalPatterns.strong]).catch(() => null); }
+  markClickSignals() { return this.page.evaluate(clickSignals, ['mark', this.signalPatterns.failure, this.signalPatterns.strong]); }
   clickSignals() { return this.page.evaluate(clickSignals, ['read', this.signalPatterns.failure, this.signalPatterns.strong]).catch(() => ({ toasts: [], dialogs: [], others: [], button: null, path: '' })); }
   get signalPatterns() { return { failure: { source: FAILURE_TEXT.source, flags: FAILURE_TEXT.flags }, strong: { source: STRONG_FAILURE_TEXT.source, flags: STRONG_FAILURE_TEXT.flags } }; }
   async clickOutcome(formUrl) {
@@ -1158,7 +1164,14 @@ export class AutoDLBrowserAdapter {
       let rows;
       for (let attempt = 0; ; attempt++) {
         try { rows = await this.instances(t.config.gpuModel); break; }
-        catch (error) { if (error.code !== 'LIST_LOADING' || attempt >= 2) throw error; await sleep(1500); }
+        catch (error) {
+          if (error.code !== 'LIST_LOADING' || attempt >= 2) {
+            // 平台已报拒绝，核对时断网或退出登录不能让后续出现的其他实例被自动认领。
+            error.noAutoBind = true;
+            throw error;
+          }
+          await sleep(1500);
+        }
       }
       const extra = rows.filter(i => isNew(i, baseline)).map(i => freshId(i, baseline));
       if (extra.length) fail('SUBMIT_UNCLEAR', '平台提示“' + shown + '”，但实例列表出现提交前没有的实例 ' + extra.slice(0, 3).join('、')
@@ -1207,7 +1220,7 @@ export class AutoDLBrowserAdapter {
       : '提交回执未提供可验证实例 ID，请在 AutoDL 核对新实例并绑定。此任务不会再次创建'};
   }
   // 点击结果不明（无法识别页面结果、服务中断等）：点击约2分钟后读取完整实例列表两次。
-  // 都没有提交前基线之外的实例才认定未创建；目标主机上恰好一个匹配的新实例则绑定；其余情况交给用户核对。
+  // 只绑定目标主机上唯一匹配的新实例。空列表可能来自平台延迟，不能据此再次付费。
   async reconcileUnclear(t) {
     const op = t.operation;
     // 从实际点击时算起（意图落盘到点击之间可能有十几秒）；旧记录没有点击时间时用意图时间。
@@ -1216,7 +1229,8 @@ export class AutoDLBrowserAdapter {
     let rows = await this.instances(t.config.gpuModel);
     if (!rows.some(i => isNew(i, baseline))) { await sleep(this.rejectRecheckMs); rows = await this.instances(t.config.gpuModel); }
     const extra = rows.filter(i => isNew(i, baseline)).map(i => freshId(i, baseline)), mine = this.newTargets(rows, t);
-    if (!extra.length) return { notCreated: true, reason: '点击结果不明，自动核对：完整实例列表两次都只有点击前已有的实例，确认未创建' };
+    if (!extra.length) return { ambiguous: true, reason: '两次核对都未发现新增实例，平台仍可能稍后创建。已保留本次提交，请到 AutoDL 核对' +
+      (t.config.raceBoot ? '；不会改为原机开机或再次克隆' : '；任务不会自动再次提交') };
     // 平台曾明确拒绝本次点击（noAutoBind）：之后出现的新实例不自动绑定，交给用户核对。
     if (mine.length === 1 && !op.noAutoBind) return { receipt: { acceptedAt: op.at, instanceId: mine[0].id, evidence: 'unique-new-instance-on-selected-host-after-unclear-click' },
       instance: { ...mine[0], gpuVerified: true }, lateIds: this.strays(t, rows, mine[0].id) };
@@ -1254,6 +1268,6 @@ export class AutoDLBrowserAdapter {
     this.setSession('not_open',{checked:true});
     return {session:this.sessionStatus(),message:'已退出本项目的 AutoDL 登录并清除专用浏览器资料；云端实例与数据盘保留'};
   }
-  async close() { if(this.context) await this.context.close(); }
+  async close() { await this.readonlyPrechecks.close(); if(this.context) await this.context.close(); }
 }
 

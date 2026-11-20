@@ -106,7 +106,7 @@ export async function readInventoryInPage({ kind, params = {} }) {
       }
     };
     // 只读预筛最多同时查询两个地区。首个非明确零即停止派发，取消并收齐其余请求后才允许主页面导航。
-    const workers = Array.from({ length: Math.min(2, groups.length) }, () => worker());
+    const workers = Array.from({ length: Math.min(params.parallelism === 1 ? 1 : 2, groups.length) }, () => worker());
     try { await Promise.all(workers); }
     finally { controller.abort(); await Promise.allSettled(workers); }
     if (!sameSession()) return { error: 'CHANGED' };
@@ -199,9 +199,9 @@ export async function readGpuCatalogApi(adapter, regions = REGIONS, { strict = f
 
 // 抢卡预筛只回答“是否全部明确无卡”；浏览器内以两个只读请求并行，首个非零/未知即可继续匹配。
 // 看板仍串行读取完整目录；任务的部分结果不冒充全市场快照，所有在途请求在本方法返回前收尾。
-export async function readTaskGpuCatalogApi(adapter, regions, model) {
+export async function readTaskGpuCatalogApi(adapter, regions, model, { parallelism = 2 } = {}) {
   const groups = inventoryRegions(await readAutodlInventory(adapter, 'regions'), regions);
-  const rows = await readAutodlInventory(adapter, 'task-gpus', { groups, modelKey: gpuKey(model) });
+  const rows = await readAutodlInventory(adapter, 'task-gpus', { groups, modelKey: gpuKey(model), parallelism });
   return { checkedAt: Date.now(), regions: rows.map(row => row.data
     ? { region: row.region, models: gpuModels(row.data) }
     : { ...row, models: [] }) };

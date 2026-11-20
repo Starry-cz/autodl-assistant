@@ -301,33 +301,47 @@ test('已停止且有提交记录的任务可以绑定已创建的实例，恢�
  await f.engine.attach(f.task,'synthetic-isolated-target');assert.equal(f.task.state,'verifying');assert.equal(f.task.operation.receipt.instanceId,'synthetic-isolated-target');
 });
 // 点击结果不明后的自动核对：不需要用户手动点“重新核对实例列表”。适配器的核对结果由测试替身给出。
-const unclearOnce=f=>{const submit=f.adapter.submit;let attempts=0;
-  f.adapter.submit=async(task,q,mark,...rest)=>{if(++attempts===1){mark();throw new AppError('SUBMIT_UNCLEAR','合成页面无结果');}return submit(task,q,mark,...rest);};return ()=>attempts;};
-test('点击结果不明：约2分钟后自动核对，确认未创建就清除记录并立即继续，下一轮改选其他主机再次提交',async t=>{
- const f=fixture(t),attempts=unclearOnce(f),reconcile=f.adapter.reconcile.bind(f.adapter);f.adapter.alternate=true;
- f.adapter.reconcile=async task=>task.operation.stage==='click_started'&&!task.operation.receipt?{notCreated:true,reason:'合成：完整实例列表两次都没有新实例'}:reconcile(task);
- await f.engine.tick();assert.equal(f.task.state,'verifying');assert.equal(f.task.nextCheckAt,f.task.operation.at+120000);
- await f.due(120000);assert.equal(f.task.state,'watching');assert.equal(f.task.operation,null);assert.equal(f.task.unclearStreak,1);assert.equal(f.task.nextCheckAt,f.clock());
- assert.ok(f.task.logs.some(l=>/两次都没有新实例；已清除提交记录，继续监测；合成922机约 2 分钟内不再选择/.test(l.message)));assert.equal(f.store.data.notifications.some(n=>n.event==='ambiguous'),false);
- await f.engine.tick();assert.equal(attempts(),2);assert.equal(f.task.state,'verifying');assert.equal(f.task.operation.stage,'accepted');assert.equal(f.task.unclearStreak,0);
- assert.equal(f.task.operation.quote.host.id,'synthetic-other-host');
-});
-test('连续两次点击结果都不明（都确认未创建）：清除记录、提醒一次，但不停止；那台主机暂时不选，到时再试',async t=>{
- const f=fixture(t);f.adapter.submit=async(task,q,mark)=>{mark();throw new AppError('SUBMIT_UNCLEAR','合成页面无结果');};
- f.adapter.reconcile=async()=>({notCreated:true,reason:'合成：没有新实例'});
- await f.engine.tick();await f.due(120000);assert.equal(f.task.state,'watching');
- // 只有一台主机且刚被暂停选择：本轮不点击，继续监测。
- await f.engine.tick();assert.equal(f.task.state,'watching');assert.equal(f.task.operation,null);assert.match(f.task.lastScan.summary,/暂不选择最近被平台拒绝的主机/);
- f.advance(2*60000);await f.engine.tick();assert.equal(f.task.state,'verifying');await f.due(120000);
- assert.equal(f.task.state,'watching');assert.equal(f.task.operation,null);assert.equal(f.task.unclearStreak,2);
- assert.equal(f.task.hostCooldowns[0].count,2);assert.equal(f.task.hostCooldowns[0].until-f.task.hostCooldowns[0].at,4*60000);
- assert.equal(f.store.data.notifications.filter(n=>n.event==='unclear-clicks').length,1);assert.equal(f.store.data.notifications.some(n=>n.event==='attention'),false);
+for (const mode of ['create', 'clone']) test(`${mode} 点击后无回执，自动核对空列表保留记录，迟到实例可绑定且全程只点击一次`, async t => {
+  const f = fixture(t, { mode });
+  let clicks = 0;
+  f.adapter.alternate = true;
+  f.adapter.submit = async (_task, _quote, mark) => {
+    mark(); clicks++;
+    throw new AppError('SUBMIT_UNCLEAR', '合成请求超时');
+  };
+  const reconcile = f.adapter.reconcile.bind(f.adapter);
+  f.adapter.reconcile = async task => task.operation.receipt ? reconcile(task) :
+    { ambiguous: true, reason: '两次核对都未发现新增实例，保留提交记录' };
+  await f.engine.tick();
+  const operationId = f.task.operation.id;
+  assert.equal(f.task.nextCheckAt, f.task.operation.clickedAt + 120000);
+  await f.due(120000);
+  assert.equal(f.task.state, 'reconciling'); assert.equal(f.task.operation.id, operationId);
+  assert.equal(f.task.operation.stage, 'click_started'); assert.equal(blocksTask(f.task, f.task.config), true);
+  assert.equal(f.store.data.notifications.filter(n => n.event === 'ambiguous').length, 1);
+  // 平台六分钟后才显示同一笔实例；自动调度即使还有其他可用主机也不得重提。
+  await f.due(4 * 60000);
+  f.adapter.extraInstances = [{ id: 'synthetic-delayed' }];
+  const checked = await f.engine.recheck(f.task);
+  assert.equal(checked.cleared, false); assert.equal(checked.extra[0].id, 'synthetic-delayed');
+  await f.engine.attach(f.task, checked.extra[0].id);
+  await f.due(65000); assert.equal(f.task.state, 'completed');
+  assert.equal(f.task.operation.id, operationId);
+  assert.equal(f.task.operation.receipt.instanceId, 'synthetic-delayed'); assert.equal(clicks, 1);
 });
 test('点击结果不明：自动核对发现目标主机上唯一的新实例时直接绑定并完成，不需要手动绑定',async t=>{
  const f=fixture(t);f.adapter.submit=async(task,q,mark)=>{mark();throw new AppError('SUBMIT_UNCLEAR','合成页面无结果');};
  f.adapter.reconcile=async task=>task.operation.receipt?{instance:{id:'synthetic-bound',running:true,gpuVerified:true}}
    :{receipt:{acceptedAt:task.operation.at,instanceId:'synthetic-bound',evidence:'unique-new-instance-on-selected-host-after-unclear-click'},instance:{id:'synthetic-bound',running:true,gpuVerified:true}};
  await f.engine.tick();await f.due(120000);assert.equal(f.task.state,'completed');assert.equal(f.task.operation.receipt.instanceId,'synthetic-bound');
+});
+test('拒单后读取列表时登录失效，进入人工核对仍保留禁止自动绑定的依据',async t=>{
+  const f=fixture(t);
+  f.adapter.submit=async(_task,_quote,mark)=>{
+    mark();throw new AppError('LOGIN_REQUIRED','合成登录失效',{noAutoBind:true});
+  };
+  await f.engine.tick();
+  assert.equal(f.task.state,'reconciling');assert.equal(f.task.operation.noAutoBind,true);
 });
 test('自动核对时读取实例列表失败：30秒后再试，连续3次失败才交给用户；登录失效立即交给用户',async t=>{
  const f=fixture(t);f.adapter.submit=async(task,q,mark)=>{mark();throw new AppError('SUBMIT_UNCLEAR','合成页面无结果');};

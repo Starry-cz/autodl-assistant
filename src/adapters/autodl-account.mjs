@@ -16,7 +16,7 @@ export async function readIdentityInPage() {
       headers: { Authorization: token, AppVersion: String(app.version || '0.0.0') },
     });
     if (response.status === 401 || response.status === 403) return { error: 'AUTH' };
-    if (!response.ok) return { error: 'API' };
+    if (!response.ok) return { error: response.status === 429 || response.status >= 500 ? 'TRANSIENT' : 'API' };
     const result = await response.json();
     if (result?.code === 'AuthorizeFailed') return { error: 'AUTH' };
     if (result?.code !== 'Success') return { error: 'API' };
@@ -46,6 +46,8 @@ export async function readAutodlIdentity(adapter) {
     throw new AppError('ACCOUNT_AUTH', 'AutoDL 登录已失效，请重新登录', { status: 409 });
   }
   if (result?.error || !result?.data)
-    throw new AppError('ACCOUNT_IDENTITY', result?.error === 'CHANGED' ? '查询期间账号已切换，请重新检查登录' : '当前账号身份未能确认，请重新检查登录', { status: 409 });
+    throw new AppError('ACCOUNT_IDENTITY', result?.error === 'CHANGED' ? '查询期间账号已切换，请重新检查登录' : '当前账号身份未能确认，请重新检查登录', {
+      status: 409, retryable: ['NETWORK', 'TRANSIENT'].includes(result?.error),
+    });
   return normalizeAccountIdentity(result.data);
 }

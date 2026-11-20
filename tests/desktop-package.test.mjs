@@ -59,7 +59,8 @@ test('安装器为不提权的完整离线包，快捷方式与发布选项明�
 });
 
 test('包内容只包含应用代码与专用浏览器缓存，不包含本机运行资料', () => {
-  assert.deepEqual(config.files, ['src/**/*', 'public/**/*', 'desktop/*.mjs', 'desktop/assets/icon.png', 'package.json', 'LICENSE']);
+  // 随样式一起分发的许可也属于桌面包白名单。
+  assert.deepEqual(config.files, ['src/**/*', 'public/**/*', 'desktop/*.mjs', 'desktop/assets/icon.png', 'package.json', 'LICENSE', 'docs/licenses/nextchat.txt']);
   assert.equal(config.extraResources.length, 1);
   assert.equal(config.extraResources[0].from, '.cache/desktop-browsers');
   assert.equal(config.extraResources[0].to, 'browsers');

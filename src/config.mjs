@@ -4,6 +4,10 @@ export const REGIONS = ['北京B区', '西北B区', '重庆A区', '内蒙B区', 
 // GPU 型号不再内置预设：表单从 AutoDL 创建页按地区同步官方型号（gpu-catalog.mjs），其他型号由用户精确填写。
 export const GPU_MODEL_MAX_LENGTH = 80;
 export const POLL_SECONDS = Object.freeze({ min: 1, max: 600, default: 10 });
+// 实验编号区分需要分别租用的实例；每个新租任务始终只申请一台。
+export const MAX_EXPERIMENT_SLOTS = 3;
+// 第一档沿用旧版的双路预检；这里只限制同时读取库存的任务数。
+export const TASK_PRECHECK_LIMITS = Object.freeze([2, 3]);
 // 首页优先：每轮只读各地区第一页，命中即核验；后续页面按间隔完整翻页兜底。默认值按用户要求设为20秒，不是测得的最优值。
 export const SCAN_SCOPES = ['full', 'first-page'];
 export const FULL_SCAN_SECONDS = Object.freeze({ min: 10, max: 3600, default: 20 });
@@ -30,6 +34,8 @@ export function normalizeConfig(input = {}) {
   if (provider !== 'autodl') fail('CONFIG', '仅支持真实 AutoDL；旧版演练任务已停用');
   const mode = input.mode ?? 'create';
   if (!['create', 'clone', 'boot'].includes(mode)) fail('CONFIG', '任务模式无效');
+  const experimentSlot = num(input.experimentSlot, 1, 1, MAX_EXPERIMENT_SLOTS, '实验编号', true);
+  if (mode !== 'create' && experimentSlot !== 1) fail('CONFIG', '实验编号只用于新租服务器');
   const raceBoot = input.raceBoot === true;
   // 原实例开机沿用原计费方式，无法在点击前核验新租报价或预算。
   if (raceBoot && mode !== 'clone') fail('CONFIG', '组合抢卡需要选择迁移克隆和已关机的源实例');
@@ -81,9 +87,12 @@ export function normalizeConfig(input = {}) {
   // 未指定时保持旧行为（每轮完整翻页）；控制台新表单默认提交首页优先。
   const scanScope = input.scanScope ?? 'full';
   if (!SCAN_SCOPES.includes(scanScope)) fail('CONFIG', '扫描方式无效');
+  const createLabel = experimentSlot > 1 ? `实验 ${experimentSlot}` : '新建实例';
+  const taskLabel = mode === 'create' ? createLabel : (raceBoot ? '原机或同区克隆' : '迁移克隆');
   return {
-    name: text(input.name || `${raceBoot ? '原机或同区克隆' : mode === 'clone' ? '迁移克隆' : '新建实例'} · ${gpuModel}`, 80),
+    name: text(input.name || `${taskLabel} · ${gpuModel}`, 80),
     provider, mode, action, paidConsent: action === 'execute', gpuModel, gpuCount, regions, cuda,
+    ...(mode === 'create' ? { experimentSlot } : {}),
     ...(raceBoot ? { raceBoot: true } : {}),
     sourceId: mode === 'clone' ? sourceId : '',
     imagePath: mode === 'create' ? imagePath : [],

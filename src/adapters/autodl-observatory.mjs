@@ -26,7 +26,7 @@ export async function readObservatoryInPage({ kind, params }) {
       redirect: 'error', signal: AbortSignal.timeout(15000),
       ...(endpoint.method === 'POST' ? { body: JSON.stringify(params) } : {}) });
     if (response.status === 401 || response.status === 403) return { error: 'AUTH' };
-    if (!response.ok) return { error: 'API' };
+    if (!response.ok) return { error: response.status === 429 || response.status >= 500 ? 'TRANSIENT' : 'API' };
     const result = await response.json();
     if (result?.code === 'AuthorizeFailed') return { error: 'AUTH' };
     if (result?.code !== 'Success') return { error: 'API' };
@@ -67,6 +67,8 @@ export async function readAutodlObservatory(adapter, kind, params = {}) {
     throw new AppError('OBSERVATORY_AUTH', 'AutoDL 网页登录已失效，请重新登录并检查状态', { status: 409 });
   }
   if (result?.error || !result?.data)
-    throw new AppError('OBSERVATORY_UNAVAILABLE', 'AutoDL 只读接口暂不可用或返回格式已变化，请稍后刷新', { status: 503 });
+    throw new AppError('OBSERVATORY_UNAVAILABLE', 'AutoDL 只读接口暂不可用或返回格式已变化，请稍后刷新', {
+      status: 503, retryable: ['NETWORK', 'TRANSIENT'].includes(result?.error),
+    });
   return result.data;
 }

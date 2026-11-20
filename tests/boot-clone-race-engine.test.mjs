@@ -149,7 +149,7 @@ for (const kind of ['boot', 'clone']) test(`${kind} 已点击后结果不明，�
   await f.engine.tick(); assert.equal(f.task.operation.kind, kind); assert.equal(f.task.operation.stage, 'click_started');
   const recovered = restart(t, f);
   f.adapter.current = original({ gpuAvailable: kind !== 'boot' }); f.advance(2 * 60000 + 1);
-  if (kind === 'clone') f.adapter.reconcile = async () => ({ notCreated: true, reason: '合成两次完整列表尚无新增' });
+  if (kind === 'clone') f.adapter.reconcile = async () => ({ ambiguous: true, reason: '合成两次完整列表尚无新增' });
   await recovered.engine.tick();
   assert.equal(recovered.task.operation.kind, kind); assert.equal(recovered.task.raceWinner, kind);
   assert.equal(f.calls.bootClicks + f.calls.cloneClicks, 1);
@@ -267,7 +267,7 @@ for (const kind of ['boot', 'clone']) for (const stage of ['intent', 'click_star
   assert.equal(stage === 'intent' ? f.task.operation : f.task.operation?.kind, stage === 'intent' ? null : kind);
   const recovered = restart(t, f);
   f.adapter.current = original({ gpuAvailable: kind !== 'boot' }); f.advance(2 * 60000 + 1);
-  if (kind === 'clone') f.adapter.reconcile = async () => ({ notCreated: true, reason: '合成完整列表尚无新增' });
+  if (kind === 'clone') f.adapter.reconcile = async () => ({ ambiguous: true, reason: '合成完整列表尚无新增' });
   await recovered.engine.tick();
   assert.equal(f.calls.bootClicks + f.calls.cloneClicks, 0);
   if (stage === 'click_started') assert.equal(recovered.task.operation.kind, kind);

@@ -9,6 +9,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createApplication, inspectRunningBackend, describeRunningBackend, stopRunningBackend, lockReleased } from '../src/server.mjs';
 import { normalizeConfig } from '../src/config.mjs';
+import { Store } from '../src/store.mjs';
 import { SyntheticAdapter } from './fixtures/synthetic-adapter.mjs';
 import { seedGpuCatalog } from './fixtures/gpu-catalog.mjs';
 async function localApp(t, aiOptions = {}, options = {}) {
@@ -31,9 +32,69 @@ test('任务接口要求本地令牌，合法请求返回队列状态',async t=>
   const response=await f.request('/api/tasks',{provider:'autodl',gpuModel:'RTX 4090',mode:'clone',action:'execute',paidConsent:true});assert.equal(response.status,201);const {task}=await response.json();assert.equal(task.state,'queued');
   const state=await (await f.request('/api/state')).json();assert.equal(state.tasks.length,1);assert.equal(state.tasks[0].config.mode,'clone');
 });
+test('工作台调度偏好默认串行，可切换并持久保存，非法或未授权请求不能更改', async t => {
+  const f = await localApp(t);
+  const state = async () => (await f.request('/api/state')).json();
+  const initial = await state();
+  assert.deepEqual(initial.scheduler, {mode:'serial', maxParallel:2, maxSupportedParallel:3});
+  assert.deepEqual(initial.meta.pollSeconds, {min:1, max:600, default:10});
+  assert.equal(initial.meta.maxExperimentSlots, 3);
+  const saved = await f.request('/api/scheduler', {mode:'parallel', maxParallel:3});
+  assert.equal(saved.status, 200);
+  assert.deepEqual((await saved.json()).scheduler, {mode:'parallel', maxParallel:3, maxSupportedParallel:3});
+  assert.deepEqual(new Store(f.dir).data.taskScheduling, {mode:'parallel', maxParallel:3});
+  const unauthorized = await fetch(f.base+'/api/scheduler', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{"mode":"serial"}'});
+  assert.equal(unauthorized.status, 403);
+  for (const mode of [null, 'turbo', 2]) assert.equal((await f.request('/api/scheduler', {mode})).status, 400);
+  for (const maxParallel of [null, 1, 4, 2.5]) assert.equal((await f.request('/api/scheduler', {mode:'parallel',maxParallel})).status, 400);
+  assert.equal((await state()).scheduler.mode, 'parallel');
+  assert.equal((await f.request('/api/scheduler', {mode:'serial'})).status, 200);
+  assert.deepEqual((await state()).scheduler, {mode:'serial', maxParallel:3, maxSupportedParallel:3});
+  assert.equal(f.app.store.tasks().length, 0);
+});
 test('HTTP暂停恢复停止不接触云端实例',async t=>{
   const f=await localApp(t),{task}=await (await f.request('/api/tasks',{provider:'autodl',gpuModel:'RTX 4090'})).json();
   for(const [action,state] of [['pause','paused'],['resume','watching'],['cancel','cancelled']]){const response=await f.request(`/api/tasks/${task.id}/${action}`,{});assert.equal(response.status,200);assert.equal((await response.json()).task.state,state);}
+});
+test('同一配置的三个实验各自授权、各租一台：重复编号拒绝，三个不同的合成实例正常完成', async t => {
+  const f = await localApp(t);
+  const config = {gpuModel:'RTX 4090', gpuCount:1, action:'execute', paidConsent:true};
+  // 选择三路并行只改调度。任务仍须按实验逐项建立，重复请求不能多建实例。
+  assert.equal((await f.request('/api/scheduler',{mode:'parallel',maxParallel:3})).status, 200);
+  assert.equal((await f.request('/api/tasks',{...config,experimentSlot:3,paidConsent:false})).status, 400);
+  for (const experimentSlot of [1,2,3]) {
+    const response = await f.request('/api/tasks',{...config,experimentSlot});
+    assert.equal(response.status, 201); assert.equal((await response.json()).task.config.experimentSlot, experimentSlot);
+  }
+  assert.equal((await f.request('/api/tasks',{...config,experimentSlot:2,name:'重复发送'})).status, 409);
+  const {engine, adapters} = f.app;
+  let now = Date.now(), clicks = 0;
+  engine.clock = adapters.autodl.clock = () => now;
+  adapters.autodl.isolatedPrecheck = async t => ({verdict:'candidate', kind:'market', taskId:t.id, ownerId:t.ownerId, checkedAt:now});
+  const submit = adapters.autodl.submit.bind(adapters.autodl);
+  adapters.autodl.submit = (...args) => { clicks++; return submit(...args); };
+  await engine.tick();
+  now += 90000;
+  for(let i=0;i<3;i++) await engine.tick();
+  const {tasks} = await (await f.request('/api/state')).json();
+  assert.equal(clicks, 3); assert.equal(tasks.length, 3);
+  assert.ok(tasks.every(t => t.state === 'completed' && t.config.gpuCount === 1));
+  assert.equal(new Set(tasks.map(t => t.result.id)).size, 3);
+});
+test('其他任务占用页面时，新任务可待交接后创建，重复请求只建立一份任务', async t => {
+  const f = await localApp(t);
+  f.app.engine.busy = true;
+  const config = {gpuModel:'RTX 4090', pollSeconds:3};
+  const one = f.request('/api/tasks', config), two = f.request('/api/tasks', config);
+  try {
+    const deadline = Date.now()+2000;
+    while (f.app.engine.browserWaiters < 2 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(f.app.engine.browserWaiters, 2);
+    assert.equal(f.app.store.tasks().length, 0);
+  } finally { f.app.engine.busy = false; }
+  const responses = await Promise.all([one,two]);
+  assert.deepEqual(responses.map(response => response.status).sort(), [201,409]);
+  assert.equal(f.app.store.tasks().length, 1);
 });
 test('真实执行未经费用确认不创建任务，重复真实任务被阻止',async t=>{
   const f=await localApp(t);const live={gpuModel:'RTX 4090',provider:'autodl',mode:'clone',sourceId:'synthetic-source',maxGpuHourly:3,maxTotalHourly:4,maxStorageDaily:5};

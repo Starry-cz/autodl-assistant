@@ -1,10 +1,21 @@
 'use strict';
 let accountBusy = null, instanceSignature = null, sourceLocked = false, manualResource = null, appliedSource = null;
 let raceSourceTerms = null;
+let approvedTerms = null;
 let pricingSnapshot = null, pricingFormSignature = null, pricingError = '', pricingRevision = 0, walletSettingsLoaded = false;
-function currentPricingSignature() {
-  const c=taskPayload();
+function currentPricingSignature(c=taskPayload()) {
   return JSON.stringify([c.provider,c.mode,c.gpuModel,c.gpuCount,c.regions,c.cuda,c.sourceId,c.imagePath,c.copyDataDisk,c.extraDiskGB,c.raceBoot]);
+}
+// 同意费用以当时的资源规格和预算条件为准；重命名、调节检查间隔可以沿用确认。
+function paidTerms(config, pricing=currentPricingSignature(config)) {
+  const budget=config.balanceGuard ? [config.expectedHours,config.balanceReserve,config.includeVouchers] : null;
+  return JSON.stringify([pricing,config.experimentSlot,budget]);
+}
+const costConsent=$('#task-form').elements.paidConsent;
+costConsent.addEventListener('input',()=>{approvedTerms=costConsent.checked ? paidTerms(taskPayload()) : null;});
+function checkPaidConsent(config,pricing) {
+  if(costConsent.checked && approvedTerms!==paidTerms(config,pricing))costConsent.checked=false;
+  return costConsent.checked;
 }
 function clearPricing() { pricingSnapshot=null;pricingFormSignature=null;pricingError='';pricingRevision++;renderPricing(); }
 function currentQuote() {
@@ -22,7 +33,8 @@ function pricingWaitMessage(snapshot) {
   return '暂无完整报价，可先开始监测。';
 }
 function renderPricing() {
-  const signature=currentPricingSignature();
+  const config=taskPayload(), signature=currentPricingSignature(config);
+  checkPaidConsent(config,signature);
   if(pricingFormSignature && signature!==pricingFormSignature){pricingSnapshot=null;pricingFormSignature=null;pricingError='';pricingRevision++;}
   const snapshot=pricingSnapshot,quote=currentQuote(),expired=!!snapshot&&Date.now()-snapshot.checkedAt>60000;
   let unit=quote?money(quote.unitHourly):'—';
@@ -166,12 +178,6 @@ $('#boot-or-clone').addEventListener('click', () => {
 $('#task-form').elements.raceBoot.addEventListener('change', () => {
   $('#task-form').elements.paidConsent.checked = false;
   updateForm();
-});
-// 组合的付费分支包含克隆盘费用，改变源、容量或复制范围必须重新授权。
-$('#task-form').addEventListener('input', event => {
-  if (raceEnabled() && ['sourceId','extraDiskGB','copyDataDisk'].includes(event.target.name)) {
-    $('#task-form').elements.paidConsent.checked = false;
-  }
 });
 $('#task-form').elements.sourceId.addEventListener('change',updateAccountForm);
 $('#task-form').addEventListener('input',renderBudget);

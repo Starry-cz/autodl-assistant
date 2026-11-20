@@ -29,14 +29,15 @@ test('源码与在线安装升级：保留资料、旧入口转发、拒绝降�
   const port = probe.address().port; await new Promise(resolve => probe.close(resolve));
   const env = { ...process.env, PORT:String(port), AUTODL_RUNTIME_DIR:runtimeDir, AUTODL_INSTALL_ROOT:oldRoot };
   const health = async () => (await fetch('http://127.0.0.1:' + port + '/api/health')).json();
-  function copyProject(target, version) {
+  async function copyProject(target, version) {
     fs.mkdirSync(target,{recursive:true});
+    // Node 22 在 Windows 上同步递归复制含中文路径的目录时可能原生崩溃；逐目录等待异步复制完成。
     for(const name of ['src','public','scripts','package.json','package-lock.json','启动抢卡助手.cmd','停止抢卡助手.cmd'])
-      fs.cpSync(path.join(ROOT,name),path.join(target,name),{recursive:true});
+      await fs.promises.cp(path.join(ROOT,name),path.join(target,name),{recursive:true});
     const metadata = JSON.parse(fs.readFileSync(path.join(target,'package.json'),'utf8')); metadata.version=version;
     fs.writeFileSync(path.join(target,'package.json'),JSON.stringify(metadata));
     // 复用已经安装的正式依赖文件，测试不依赖 npm 网络或开发依赖。
-    for(const name of ['playwright','playwright-core']) fs.cpSync(path.join(ROOT,'node_modules',name),path.join(target,'node_modules',name),{recursive:true});
+    for(const name of ['playwright','playwright-core']) await fs.promises.cp(path.join(ROOT,'node_modules',name),path.join(target,'node_modules',name),{recursive:true});
   }
   const start = root => ps(path.join(root,'scripts/start-local.ps1'),['-NoOpen','-NoPause'],env,directory);
   const stop = () => run(process.execPath,[path.join(oldRoot,'scripts/stop-server.mjs')],env,directory);
@@ -46,7 +47,7 @@ test('源码与在线安装升级：保留资料、旧入口转发、拒绝降�
     assert.equal(path.dirname(target),path.resolve(os.tmpdir())); assert.ok(path.basename(target).startsWith('autodl-launcher-upgrade-'));
     fs.rmSync(target,{recursive:true,force:true});
   });
-  copyProject(oldRoot,'1.2.0'); copyProject(sourceRoot,'1.3.0');
+  await copyProject(oldRoot,'1.2.0'); await copyProject(sourceRoot,'1.3.0');
   const store = new Store(runtimeDir);
   const task = store.create({provider:'autodl',mode:'boot',instanceId:'fixture-paused',timeoutMinutes:60});
   store.patch(task,{state:'paused'});
@@ -67,13 +68,13 @@ test('源码与在线安装升级：保留资料、旧入口转发、拒绝降�
 
   // 本地发布 ZIP 只替换安装器测试副本的下载地址，仍执行真实下载、解压、侧装及启停脚本。
   const archiveRoot = path.join(directory,'发布包'), archiveProject = path.join(archiveRoot,'autodl-assistant-v1.3.0');
-  copyProject(archiveProject,'1.3.0');
+  await copyProject(archiveProject,'1.3.0');
   const zip = path.join(directory,'release.zip');
   result = await run(shell,['-NoProfile','-Command',`Add-Type -AssemblyName System.IO.Compression.FileSystem;[IO.Compression.ZipFile]::CreateFromDirectory(${quote(archiveRoot)},${quote(zip)})`],env,directory);
   assert.equal(result.code,0,result.output);
   // 用另一个已安装旧版目录检验 install.ps1 的升级分支，与前面的源码路径彼此独立。
   result = await stop(); assert.equal(result.code,0,result.output);
-  const onlineRoot = path.join(directory,'在线安装 [旧版]'); copyProject(onlineRoot,'1.2.0');
+  const onlineRoot = path.join(directory,'在线安装 [旧版]'); await copyProject(onlineRoot,'1.2.0');
   // 未经启动器登记的已有安装也可能显式指定资料目录；侧装新版不能把相对目录移到新版程序内。
   const onlineRuntime = path.join(directory,'自定义资料 [保留]'), onlineEnv = {...env,AUTODL_RUNTIME_DIR:path.relative(onlineRoot,onlineRuntime),AUTODL_INSTALL_ROOT:onlineRoot};
   new Store(onlineRuntime).save(); fs.writeFileSync(path.join(onlineRuntime,'retained.txt'),'keep');

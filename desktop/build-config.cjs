@@ -23,6 +23,8 @@ module.exports = {
     'desktop/assets/icon.png',
     'package.json',
     'LICENSE',
+    // 桌面版随分组列表样式一同分发其原始许可。
+    'docs/licenses/nextchat.txt',
   ],
   // 浏览器来自构建准备步骤，连同许可证和 ffmpeg/winldd 一起打包；不读取用户浏览器缓存。
   extraResources: [{

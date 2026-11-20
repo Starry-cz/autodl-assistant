@@ -6,7 +6,7 @@ export class AppError extends Error {
     if (race) this.race = true;
     // notCreated：点击后平台明确拒绝，且两次读取实例列表都没有新实例，可清除提交记录。
     if (notCreated) this.notCreated = true;
-    // unrecognized：确认未创建，但没有识别出平台给出的原因（例如页面没有任何新提示）。
+    // 未识别的回执不能作为平台拒绝创建的依据。
     if (unrecognized) this.unrecognized = true;
     // absent：所选地区的页面筛选中没有该 GPU 型号。
     if (absent) this.absent = true;

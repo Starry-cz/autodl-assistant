@@ -44,9 +44,93 @@ try {
   await page.goto(base);await page.waitForFunction(()=>document.querySelector('#connection').textContent==='已连接');
   await page.locator('[data-view=dashboard]').click();
   const form=page.locator('#task-form'),field=name=>form.locator('[name='+name+']'),dialog=page.locator('#task-conflict-dialog');
+  const scheduler=page.getByRole('combobox',{name:'任务调度'}), schedulerStatus=page.locator('#scheduler-status');
+  const readLimit=page.getByRole('combobox',{name:'同时查库存'});
+  assert.equal(await scheduler.inputValue(),'serial');
+  assert.equal(await scheduler.isEnabled(),true);
+  assert.equal(await readLimit.isHidden(),true);
+  const staleRead=Promise.withResolvers(), allowOldState=Promise.withResolvers();
+  // 让切换前真实读取的快照迟到，验证前端不会用旧模式覆盖保存结果。
+  await page.route(base+'/api/state',async route=>{
+    const snapshot=await route.fetch();staleRead.resolve();
+    await allowOldState.promise;await route.fulfill({response:snapshot});
+  },{times:1});
+  await page.evaluate(()=>{void refresh();});
+  await staleRead.promise;
+  const posted=page.waitForResponse(r=>r.url()===base+'/api/scheduler'&&r.request().method()==='POST');
+  await scheduler.selectOption('parallel');
+  const saved=await posted;
+  assert.equal(saved.ok(),true);assert.deepEqual(saved.request().postDataJSON(),{mode:'parallel',maxParallel:2});
+  await page.waitForFunction(()=>!document.querySelector('#scheduler-mode').disabled);
+  allowOldState.resolve();
+  await page.waitForFunction(()=>!fetching);
+  assert.equal(await scheduler.inputValue(),'parallel');assert.equal(await readLimit.inputValue(),'2');
+  assert.match(await schedulerStatus.textContent(),/其余任务排队.*付费提交逐笔核验/);
+  const chooseThree=page.waitForResponse(r=>r.url()===base+'/api/scheduler'&&r.request().method()==='POST');
+  await readLimit.selectOption('3');
+  assert.deepEqual((await (await chooseThree).json()).scheduler, {mode:'parallel',maxParallel:3,maxSupportedParallel:3});
+  await page.waitForFunction(()=>!document.querySelector('#scheduler-limit').disabled);
+  assert.equal(await field('paidConsent').isChecked(),false);assert.equal(posts.length,0);
+  await page.reload();await page.waitForFunction(()=>document.querySelector('#connection').textContent==='已连接');
+  await page.locator('[data-view=dashboard]').click();
+  assert.equal(await scheduler.inputValue(),'parallel');
+  assert.equal(await readLimit.inputValue(),'3');
+  // 保存失败要恢复已生效的选项，且保留可重试入口。
+  await page.route(base+'/api/scheduler',route=>route.fulfill({status:409,json:{error:'UPDATING',message:'正在准备更新'}}),{times:1});
+  await readLimit.selectOption('2');
+  await page.waitForFunction(()=>document.querySelector('#toast').textContent.includes('调度方式保存失败'));
+  assert.equal(await readLimit.inputValue(),'3');assert.equal(await scheduler.isEnabled(),true);
+  await scheduler.selectOption('serial');
+  await page.waitForFunction(()=>!document.querySelector('#scheduler-mode').disabled);
+  assert.equal(await scheduler.inputValue(),'serial');assert.equal(await readLimit.isHidden(),true);
+  await scheduler.selectOption('parallel');
+  await page.waitForFunction(()=>!document.querySelector('#scheduler-limit').disabled);
+  assert.equal(await readLimit.inputValue(),'3');
+  await page.setViewportSize({width:320,height:800});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
+  await page.setViewportSize({width:1440,height:1080});
+  // 上一版支持串/并行，但固定双路，页面不能给出三路选择。
+  const fixedScheduler=async route=>{
+    const state=await (await route.fetch()).json();
+    state.scheduler={mode:'parallel',maxParallel:2};await route.fulfill({json:state});
+  };
+  await page.route(base+'/api/state',fixedScheduler);await page.evaluate(()=>refresh());
+  await page.waitForFunction(()=>document.querySelector('#scheduler-status').textContent.includes('同时查 2 项'));
+  assert.equal(await scheduler.isEnabled(),true);assert.equal(await readLimit.isHidden(),true);
+  await page.unroute(base+'/api/state',fixedScheduler);
+  // 旧后台不会提供范围或调度模式，不开放无法兑现的并行选项。
+  await page.route(base+'/api/state',async route=>{
+    const state=await (await route.fetch()).json();delete state.scheduler;delete state.meta;
+    await route.fulfill({json:state});
+  });
+  await page.evaluate(()=>refresh());
+  await page.waitForFunction(()=>document.querySelector('#scheduler-status').textContent.includes('当前后台不支持'));
+  assert.equal(await scheduler.isDisabled(),true);assert.equal(await scheduler.inputValue(),'');
+  assert.equal(await field('experimentSlot').isHidden(),true);
+  assert.equal(await page.evaluate(()=>Object.hasOwn(taskPayload(), 'experimentSlot')),false);
+  assert.equal(await page.locator('#poll-presets').isHidden(),true);assert.equal(await field('pollSeconds').getAttribute('min'),'10');
+  await page.unroute(base+'/api/state');
+  await page.evaluate(()=>refresh());await page.waitForFunction(()=>!document.querySelector('#scheduler-mode').disabled);
+  assert.equal(app.store.tasks().length,1);assert.equal(old.state,'attention');assert.equal(posts.length,0);
+  assert.equal(await field('experimentSlot').inputValue(),'1');
+  for(const mode of ['boot','clone']){
+    await page.locator('[data-mode='+mode+']').click();
+    assert.equal(await field('experimentSlot').isHidden(),true);
+    assert.equal(await page.evaluate(()=>Object.hasOwn(taskPayload(), 'experimentSlot')),false);
+  }
+  await page.locator('[data-mode=create]').click();
   await selectSyntheticImage(page);await field('gpuModel').selectOption('RTX 4090');await field('pollSeconds').fill('10');await field('extraDiskGB').fill('50');
   await page.locator('#balance-options > summary').click();
   await field('balanceGuard').uncheck();await page.locator('[data-action-choice=execute]').click();await field('paidConsent').check();
+  // 变更计费配置要重新确认；修改便于识别的任务名称不影响本次授权。
+  await field('name').fill('合成重建任务');
+  assert.equal(await field('paidConsent').isChecked(),true);
+  await field('gpuCount').selectOption('2');
+  assert.equal(await field('paidConsent').isChecked(),false,'增加 GPU 数量后必须重新授权');
+  await field('gpuCount').selectOption('1');await field('balanceGuard').check();await field('paidConsent').check();
+  await field('balanceGuard').uncheck();
+  assert.equal(await field('paidConsent').isChecked(),false,'关闭预算保护后必须重新授权');
+  await field('paidConsent').check();
   await page.locator('#submit-task').click();await dialog.waitFor({state:'visible'});
   assert.match(await page.locator('#conflict-old').textContent(),/CUDA 13\.0/);assert.match(await page.locator('#conflict-error').textContent(),/13\.0.*失效/);
   assert.match(await page.locator('#conflict-current').textContent(),/CUDA 12\.1/);assert.match(await page.locator('#conflict-current').textContent(),/自动提交并开机/);
@@ -86,9 +170,29 @@ try {
   assert.equal(next.operation,null);assert.equal(next.state,'cancelled');assert.ok(next.logs.some(l=>/重新核对/.test(l.message)));
   await page.locator('#close-dialog').click();await page.locator('#submit-task').click();
   await page.waitForFunction(()=>document.querySelector('#task-count').textContent==='3');assert.equal(app.store.tasks().length,3);assert.equal(app.store.tasks()[0].operation,null);
+  // 相同资源分别建三条任务；切换编号需要重新授权，任何一次提交都只创建一条本地记录。
+  for(const slot of [2,3]){
+    await field('experimentSlot').selectOption(String(slot));
+    assert.equal(await field('paidConsent').isChecked(),false);
+    assert.match(await page.locator('#consent-text').textContent(),new RegExp('实验 '+slot+'.*1 台.*分别计费'));
+    await field('name').fill('合成实验');await field('paidConsent').check();
+    const postedTask=page.waitForResponse(r=>r.url()===base+'/api/tasks'&&r.request().method()==='POST');
+    await page.locator('#submit-task').click();
+    const response=await postedTask;assert.equal(response.status(),201);
+    assert.equal(response.request().postDataJSON().experimentSlot,slot);
+    const {task}=await response.json();
+    const card=page.locator('[data-task-id="'+task.id+'"]');
+    await card.waitFor();assert.match(await card.textContent(),new RegExp('实验 '+slot));
+    await card.locator('[data-detail]').click();
+    assert.match(await page.locator('#detail-title').textContent(),new RegExp('实验 '+slot));
+    await page.locator('#close-dialog').click();
+  }
+  const experiments=app.store.tasks().filter(task=>task.state==='queued');
+  assert.deepEqual(experiments.map(task=>task.config.experimentSlot).sort(),[1,2,3]);
+  assert.ok(experiments.every(task=>task.config.gpuModel==='RTX 4090'&&task.config.gpuCount===1&&!task.operation));
   // 队列随任务自然增长；两列底部对齐，页面仍可滚到最后任务与提交按钮。
   await page.setViewportSize({width:1440,height:1080});
-  for(let i=0;i<10;i++){const extra=app.store.create(normalizeConfig(configInput({name:'合成队列任务 '+(i+1)})));app.store.patch(extra,{state:'cancelled',lastScan:{at:Date.now(),count:10,summary:'合成扫描摘要：北京B区（1 页，已到末页），用于验证队列滚动'}});}
+  for(let i=0;i<8;i++){const extra=app.store.create(normalizeConfig(configInput({name:'合成队列任务 '+(i+1)})));app.store.patch(extra,{state:'cancelled',lastScan:{at:Date.now(),count:10,summary:'合成扫描摘要：北京B区（1 页，已到末页），用于验证队列滚动'}});}
   await page.waitForFunction(()=>document.querySelector('#task-count').textContent==='13');
   await page.locator('.composer').scrollIntoViewIfNeeded();
   const queue=await page.evaluate(()=>{const list=document.querySelector('#tasks'),fields=document.querySelector('.config-fields');
@@ -121,6 +225,62 @@ try {
   await page.waitForTimeout(2300);const after=await topKey();
   assert.equal(after.key,before.key,JSON.stringify({before,after}));assert.ok(after.scrollTop>=before.scrollTop,JSON.stringify({before,after}));
   await page.locator('#close-dialog').click();
+  // 两个窗口可以先后连接不同账号。分别覆盖已显示的冲突、切换后才返回的冲突。
+  let owner='synthetic-owner-a', holdConflict=false;
+  const delayedConflict=Promise.withResolvers(), releaseConflict=Promise.withResolvers();
+  for(const endpoint of ['/api/observatory/overview','/api/observatory/billing','/api/autodl/gpus']){
+    await page.route(base+endpoint,route=>route.fulfill({json:{}}));
+  }
+  await page.route(base+'/api/state',async route=>{
+    const state=await (await route.fetch()).json();
+    state.account={enabled:true,identity:{ownerId:owner,accountId:owner,displayName:owner}};
+    await route.fulfill({json:state});
+  });
+  await page.route(base+'/api/tasks',async route=>{
+    if(holdConflict){delayedConflict.resolve();await releaseConflict.promise;}
+    await route.fulfill({status:409,json:{error:'DUPLICATE',message:'已有任务',conflict:{
+      id:old.id,name:'账号 A 的实验',state:'paused',gpuModel:'RTX 4090',regions:['北京B区'],replaceable:true,
+    }}});
+  });
+  const waitForOwner=()=>page.waitForFunction(id=>document.querySelector('#profile-name').textContent===id,owner);
+  await waitForOwner();await selectSyntheticImage(page);await field('gpuModel').selectOption('RTX 4090');
+  await page.locator('[data-action-choice=execute]').click();await field('paidConsent').check();
+  await page.locator('#submit-task').click();await dialog.waitFor({state:'visible'});
+  owner='synthetic-owner-b';await waitForOwner();
+  assert.equal(await dialog.isVisible(),false,'换账号后应关闭前一个账号的任务冲突');
+  assert.equal(await field('paidConsent').isChecked(),false);
+  assert.equal(posts.at(-1).expectedOwnerId,'synthetic-owner-a');
+  owner='synthetic-owner-a';await waitForOwner();await field('paidConsent').check();
+  holdConflict=true;await page.locator('#submit-task').click();await delayedConflict.promise;
+  owner='synthetic-owner-b';await waitForOwner();releaseConflict.resolve();
+  await page.waitForFunction(()=>!document.querySelector('#submit-task').disabled);
+  assert.equal(await dialog.isVisible(),false,'旧账号的冲突回执不应在新账号重新打开');
+  const catalogRequested=Promise.withResolvers(), returnCatalog=Promise.withResolvers();
+  await page.waitForFunction(()=>!window.workspaceSyncing);
+  await page.route(base+'/api/autodl/gpus',async route=>{
+    catalogRequested.resolve();await returnCatalog.promise;
+    await route.fulfill({json:{checkedAt:Date.now(),regions:[{region:'北京B区',models:[{model:'上一账号专属型号',available:1,total:1}]}]}});
+  },{times:1});
+  await page.locator('#sync-gpus').click();await catalogRequested.promise;
+  owner='synthetic-owner-c';await waitForOwner();await page.waitForFunction(()=>!window.workspaceSyncing&&!fetching);returnCatalog.resolve();
+  await page.waitForFunction(()=>!gpuSyncing&&!fetching);
+  assert.equal(await field('gpuModel').locator('option[value="上一账号专属型号"]').count(),0,'旧账号的同步响应不能成为新账号的库存目录');
+  // 同一账号的慢心跳可以晚于手动同步返回；已显示的新目录应保留。
+  const oldSnapshot=Promise.withResolvers(), returnSnapshot=Promise.withResolvers();
+  await page.route(base+'/api/state',async route=>{
+    const state=await (await route.fetch()).json();
+    state.account={enabled:true,identity:{ownerId:owner,accountId:owner,displayName:owner}};
+    oldSnapshot.resolve();await returnSnapshot.promise;await route.fulfill({json:state});
+  },{times:1});
+  await page.evaluate(()=>{void refresh();});await oldSnapshot.promise;
+  await page.route(base+'/api/autodl/gpus',route=>route.fulfill({json:{checkedAt:Date.now(),regions:[
+    {region:'北京B区',models:[{model:'当前账号最新型号',available:1,total:2}]},
+  ]}}),{times:1});
+  await page.locator('#sync-gpus').click();
+  const latestModel=field('gpuModel').locator('option[value="当前账号最新型号"]');
+  await latestModel.waitFor({state:'attached'});returnSnapshot.resolve();
+  await page.waitForFunction(()=>!fetching);
+  assert.equal(await latestModel.count(),1,'较早的心跳不能覆盖新同步的型号');
   assert.equal(app.store.data.notifications.length,0);assert.equal(forbiddenCalls,0);assert.deepEqual(blocked,[]);assert.deepEqual(errors,[]);
   console.log('任务界面通过：旧 CUDA 错误定位、当前表单保留、查看日志、显式重建、提交保护、旧后台提示、已停止不明提交的重新核对与清除后新建、320～1440px 弹窗布局；任务队列自然增长、两列底齐、末条任务与提交可达、收起后刷新仍保持；详情日志往下翻时刷新与新增日志不会弹回最上面；无云端操作或通知。');
 } finally {

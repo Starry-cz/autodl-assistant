@@ -8,6 +8,7 @@ import { normalizeAccountIdentity } from '../src/account-scope.mjs';
 import { AppError } from '../src/errors.mjs';
 import { createObservatoryFixtureAdapter, OBSERVATORY_INSTANCE_ID } from './fixtures/observatory.mjs';
 import { configInput, testConfig } from './fixtures/config.mjs';
+import { gate } from './helpers.mjs';
 
 const identity = letter => normalizeAccountIdentity({ accountId: `synthetic-account-${letter}`, subAccountId: null,
   kind: 'main', displayName: `合成账号 ${letter}` });
@@ -92,6 +93,50 @@ async function fixture(t) {
     setSession: value => { session = value; }, get probes() { return probes; }, get logouts() { return logouts; } };
 }
 
+for (const route of ['/api/autodl/instances', '/api/observatory/overview', '/api/observatory/billing']) {
+  test('身份后验期间轮询不能读到未经确认的快照 ' + route, async t => {
+    const f = await fixture(t);
+    await f.connect();
+    // 第一轮确认 A；数据读取时浏览器已切换 B，保持最终身份查询未完成，同时从另一个标签页轮询。
+    const entered = gate(), release = gate();
+    let checks = 0;
+    f.adapter.readIdentity = async () => {
+      if (++checks === 1) { f.setAccount(ACCOUNT_B); return ACCOUNT_A; }
+      entered.resolve();
+      await release.promise;
+      return ACCOUNT_B;
+    };
+    const sync = f.request(route, {});
+    await entered.promise;
+    let state;
+    try { state = await f.state(); } finally { release.resolve(); }
+    assert.equal((await sync).status, 409);
+    assert.equal(state.account.identity.ownerId, ACCOUNT_A.ownerId);
+    assert.deepEqual(state.autodlInstances.instances, []);
+    assert.equal(state.observatory.overview, null);
+    assert.equal(state.observatory.billing, null);
+  });
+}
+
+test('退出账号期间完成的余额刷新不再返回原账号余额', async t => {
+  const f = await fixture(t);
+  await f.connect();
+  f.app.wallet.setToken('synthetic-wallet-a');
+  const entered = gate(), release = gate();
+  f.app.wallet.fetchImpl = async () => {
+    entered.resolve();
+    await release.promise;
+    return Response.json({ code: 'Success', data: { assets: 123400, voucher_balance: 0 } });
+  };
+  const refresh = f.request('/api/wallet/refresh', {});
+  await entered.promise;
+  try { assert.equal((await f.request('/api/browser/logout', {})).status, 200); }
+  finally { release.resolve(); }
+  const result = await refresh;
+  assert.equal(result.status, 409);
+  assert.equal(result.body.wallet, undefined);
+});
+
 test('主机明细要求当前账号并在查询结束复核身份，不泄露跨账号结果', async t => {
   const f = await fixture(t); let calls = 0;
   f.adapter.marketHosts = async query => { calls++; assert.deepEqual(query,{model:'RTX 4090',region:'北京B区'}); return {rows:[{hostId:'synthetic-host'}]}; };
@@ -145,6 +190,28 @@ test('测试通知发送期间换号，不将原账号回执返回为新账号�
   assert.equal(f.app.store.tasks().length, 0); assert.equal(f.app.store.data.notifications.length, 0);
 });
 
+test('账号接口短时限流后，任务须重新核对同一账号才能恢复，不能沿用过期身份', async t => {
+  const f = await fixture(t); await f.connect();
+  const task = f.seedTask({ownerId:ACCOUNT_A.ownerId});
+  const transient = new AppError('ACCOUNT_IDENTITY','合成身份查询限流',{retryable:true});
+  f.setIdentityError(transient);
+  await assert.rejects(f.adapter.verifyTaskOwner(task), error => error === transient);
+  let state = await f.state();
+  assert.equal(state.account.identity, null); assert.deepEqual(state.tasks, []);
+  assert.equal((await f.request('/api/wallet/refresh', {})).status, 409);
+  f.setIdentityError(null); await f.adapter.verifyTaskOwner(task);
+  state = await f.state();
+  assert.equal(state.account.identity.ownerId, ACCOUNT_A.ownerId);
+  assert.deepEqual(state.tasks.map(t => t.id), [task.id]);
+
+  f.setIdentityError(transient); await assert.rejects(f.adapter.verifyTaskOwner(task));
+  f.setIdentityError(null); f.setAccount(ACCOUNT_B);
+  await assert.rejects(f.adapter.verifyTaskOwner(task), {code:'LOGIN_CHECK_REQUIRED'});
+  assert.equal(task.state, 'paused');
+  assert.equal((await f.state()).account.identity, null);
+  assert.equal(f.probes, 0);
+});
+
 test('任务控制的账号核验遵守页面锁，忙碌时不会读错页面并清空连接', async t => {
   const f = await fixture(t); await f.connect();
   const task = f.seedTask({ ownerId: ACCOUNT_A.ownerId, state: 'paused' });
@@ -160,6 +227,35 @@ test('任务控制的账号核验遵守页面锁，忙碌时不会读错页面�
       assert.equal((await f.state()).account.identity?.ownerId, ACCOUNT_A.ownerId, '忙碌不应导致账号意外断开');
     }
   } finally { f.app.engine.busy = false; }
+});
+
+test('另一标签页已经切换账号，旧表单不能为新账号建立付费任务', async t => {
+  const f = await fixture(t);
+  await f.connect(ACCOUNT_A);
+  await f.connect(ACCOUNT_B);
+  const config = configInput({ action: 'execute', paidConsent: true, expectedOwnerId: ACCOUNT_A.ownerId });
+  const stale = await f.request('/api/tasks', config);
+  assert.equal(stale.status, 409);
+  assert.equal(stale.body.error, 'TASK_CHANGED');
+  assert.equal(f.app.store.tasks().length, 0);
+  const fresh = await f.request('/api/tasks', { ...config, expectedOwnerId: ACCOUNT_B.ownerId });
+  assert.equal(fresh.status, 201, JSON.stringify(fresh.body));
+  assert.equal(fresh.body.task.ownerId, ACCOUNT_B.ownerId);
+});
+
+test('排队创建新任务期间换号，不能在新账号下建立旧账号的任务', async t => {
+  const f = await fixture(t); await f.connect();
+  f.app.engine.busy = true;
+  const pending = f.request('/api/tasks',configInput());
+  try {
+    const deadline = Date.now()+2000;
+    while (!f.app.engine.browserWaiters && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(f.app.engine.browserWaiters, 1);
+    f.setAccount(ACCOUNT_B);
+  } finally { f.app.engine.busy = false; }
+  assert.equal((await pending).status, 409);
+  assert.equal(f.app.store.tasks().length, 0);
+  assert.equal((await f.state()).account.identity, null);
 });
 
 test('恢复核验占有页面锁，核验中的后续取消不会被旧恢复请求覆盖', async t => {
@@ -438,6 +534,40 @@ test('切换账号和清除凭据推进通知配置修订，旧页面不能恢�
   assert.equal((await f.state()).notificationSettingsRevision, 4);
   const oldTest = await f.request('/api/notifications/test', { channel: 'wechat', expectedRevision: 1 });
   assert.equal(oldTest.status, 409); assert.deepEqual(f.delivered, []);
+});
+
+test('消息中心按当前账号取最近100条，其他账号的新消息不会挤掉旧消息', async t => {
+  const f = await fixture(t);
+  await f.connect();
+  const a = f.seedTask({ ownerId: ACCOUNT_A.ownerId, state: 'completed' });
+  const b = f.seedTask({ ownerId: ACCOUNT_B.ownerId, state: 'completed' });
+  // 批量写入真实通知结构，保持 A 的整段历史都早于 B 的最近百条。
+  for (const task of [a, b]) {
+    f.app.store.enqueueNotification(task, 'found', task.id);
+    const sample = f.app.store.data.notifications.at(-1);
+    for (let i = 1; i <= 100; i++) f.app.store.data.notifications.push({ ...sample, id: task.id + '-' + i, key: sample.key + '-' + i });
+  }
+  f.app.store.save();
+  for (const [task, account] of [[a, ACCOUNT_A], [b, ACCOUNT_B]]) {
+    await f.connect(account);
+    const { notifications } = await f.state();
+    assert.equal(notifications.length, 100);
+    assert.deepEqual(notifications.map(n => n.id), Array.from({ length: 100 }, (_, i) => task.id + '-' + (100 - i)));
+  }
+});
+
+test('全部标记已读遇写盘失败仍显示未读，重试只影响当前账号', async t => {
+  const f = await fixture(t);
+  await f.connect();
+  const a = f.seedTask({ ownerId: ACCOUNT_A.ownerId }), b = f.seedTask({ ownerId: ACCOUNT_B.ownerId });
+  for (const task of [a, b]) f.app.store.enqueueNotification(task, 'completed', task.id);
+  const write = t.mock.method(f.app.store, 'save', () => { throw Error('合成写盘失败'); });
+  assert.equal((await f.request('/api/notifications/read', {})).status, 500);
+  assert.equal((await f.state()).notifications[0].read, false);
+  write.mock.restore();
+  assert.equal((await f.request('/api/notifications/read', {})).status, 200);
+  const saved = JSON.parse(fs.readFileSync(f.app.store.file, 'utf8')).notifications;
+  assert.deepEqual(saved.map(n => n.read), [true, false]);
 });
 
 test('通知读取和发送只处理当前账号，断开会话时不外发旧通知', async t => {
