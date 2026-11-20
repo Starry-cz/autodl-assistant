@@ -48,7 +48,7 @@ function updateGpuSelection(){
   $('#gpu-model-title').textContent=currentMode!=='clone'?'GPU 精确型号':source?'目标 GPU 型号（可更换）':'目标 GPU 型号';
   $('#metric-gpu-model').textContent=model || '尚未选择';
   $('#metric-gpu-model').classList.toggle('long-model',model.length>22);
-  $('#metric-gpu-detail').textContent=model ? form.elements.gpuCount.value+' 张 · '+(currentMode==='boot'?'原实例开机':currentMode!=='clone'?'新建实例':!source||same?'同源型号克隆':'克隆到其他型号') : '选择 GPU 型号';
+  $('#metric-gpu-detail').textContent=model ? form.elements.gpuCount.value+' 张 · '+(currentMode==='boot'?'原实例开机':currentMode!=='clone'?'新建实例':!source||same?'同源型号克隆':'克隆到其他型号') : '';
   renderGpuCatalogStatus();
 }
 // 任务的环境 CUDA：新建取所选镜像；克隆取首次检查时从源实例读到的 CUDA。
@@ -162,11 +162,11 @@ function updateForm(){
     choice.classList.toggle('selected',selected);choice.setAttribute('aria-pressed',String(selected));
   }
   $('#action-execute-title').textContent=boot?'自动开机':currentMode==='clone'?'自动克隆并开机':'自动新租';
-  $('#action-execute-description').textContent=boot?'原主机有卡后，为所选实例开机':currentMode==='clone'?'满足条件后克隆环境并启动':'满足条件后创建并启动实例';
-  $('#action-notify-description').textContent=boot?'发现原主机有卡时提醒，不开机':'发现符合条件的资源后提醒，不创建实例';
+  $('#action-execute-description').textContent=boot?'原主机有卡后开机':currentMode==='clone'?'克隆环境并开机':'创建实例并开机';
+  $('#action-notify-description').textContent=boot?'有卡时通知，不开机':'有卡时通知，不创建实例';
   $('#consent-text').textContent=boot?'我授权为选中的原实例自动有卡开机，沿用原计费方式并产生费用。运行后需在 AutoDL 自行关机。':'我授权按提交时 AutoDL 报价自动创建或克隆并开机，费用由本人承担。预览不锁价，运行后需自行关机。';
-  $('#submit-task').innerHTML=(boot?(execute?'开始等待并开机':'监测原实例 GPU'):(execute?'启用真实抢卡':'开始真实库存监测'))+' <span>→</span>';
-  $('#task-footnote').textContent=boot?'暂停监测不会关闭云端实例。':'成功后自动结束监测。';
+  $('#submit-task').innerHTML=(boot?(execute?'开始监测并开机':'监测原实例 GPU'):(execute?'开始抢卡':'开始库存监测'))+' <span>→</span>';
+  $('#task-footnote').textContent=boot?'暂停监测不会关闭云端实例。':'';
   form.elements.fullScanSeconds.disabled=boot||form.elements.scanScope.value!=='first-page';
   updateGpuSelection();
   window.updateAccountForm?.();
@@ -231,7 +231,7 @@ function renderTasks(){
   $('#task-count').textContent=tasks.length;
   const html=tasks.length?tasks.map(t=>{
     const c=t.config,progress=t.state==='completed'?(c.mode==='clone'?(c.copyDataDisk!==false?'数据盘复制完成，目标 GPU 实例已运行':'系统盘克隆完成，目标 GPU 实例已运行（未复制数据盘）'):c.mode==='boot'?'原实例已确认有卡运行':'目标 GPU 实例已运行'):(t.lastError || t.balanceLow?.message || t.lastProgress || t.lastScan?.summary || '等待资源检查');
-    return `<article class="task-card" data-task-id="${esc(t.id)}"><div class="task-top"><h3 title="${esc(c.name)}">${esc(c.name)}</h3>${badge(t.state,c.mode)}</div><div class="task-meta"><span>${modeLabel(c.mode)}</span><span>${esc(c.gpuModel)} × ${c.gpuCount}</span><span>${esc(c.regions.join(' / '))}</span><span>${esc(taskCuda(t))}</span></div><div class="task-progress${t.lastError||t.balanceLow?' error':''}">${esc(progress)}</div>${window.taskMonitor.summary(t)}<div class="task-bottom"><small>检查 ${t.attempts} 次 · ${c.pollSeconds}s 间隔 · ${esc(scanLabel(c))}<br>${t.result?.id?`实例 ${esc(t.result.id)}`:`更新于 ${time(t.updatedAt)}`}</small><div class="task-buttons">${ACTIVE.includes(t.state)?`<button class="text-button" data-command="pause" data-id="${t.id}">暂停</button>`:''}${canResumeTask(t)?`<button class="text-button" data-command="resume" data-id="${t.id}">${canReconcileBoot(t)?'继续核对原实例':'恢复'}</button>`:''}<button class="text-button" data-detail="${t.id}">详情与日志 ↗</button></div></div></article>`;
+    return `<article class="task-card" data-task-id="${esc(t.id)}"><div class="task-top"><h3 title="${esc(c.name)}">${esc(c.name)}</h3>${badge(t.state,c.mode)}</div><div class="task-meta"><span>${modeLabel(c.mode)}</span><span>${esc(c.gpuModel)} × ${c.gpuCount}</span><span>${esc(c.regions.join(' / '))}</span><span>${esc(taskCuda(t))}</span></div><div class="task-progress${t.lastError||t.balanceLow?' error':''}">${esc(progress)}</div>${window.taskMonitor.summary(t)}<div class="task-bottom"><small>检查 ${t.attempts} 次 · ${c.pollSeconds}s 间隔 · ${esc(scanLabel(c))}<br>${t.result?.id?`实例 ${esc(t.result.id)}`:`更新于 ${time(t.updatedAt)}`}</small><div class="task-buttons">${ACTIVE.includes(t.state)?`<button class="text-button" data-command="pause" data-id="${t.id}">暂停</button>`:''}${canResumeTask(t)?`<button class="text-button" data-command="resume" data-id="${t.id}">${canReconcileBoot(t)?'继续核对原实例':'恢复'}</button>`:''}<button class="text-button" data-detail="${t.id}" aria-haspopup="dialog" aria-controls="task-dialog">详情与日志</button></div></div></article>`;
   }).join(''):`<div class="empty"><div class="empty-icon">◫</div><h3>暂无任务</h3><p>配置任务后开始监测。</p></div>`;
   replaceKeeping($('#tasks'),html);
   window.taskMonitor.tick();
@@ -464,6 +464,12 @@ $('#task-form').addEventListener('submit',async e=>{
   button.disabled=true;try{await api('/api/tasks',data);await taskCreated();}catch(error){if(error.code==='DUPLICATE')showTaskConflict(error,data);else toast(error.message,true);}finally{button.disabled=false;}
 });
 document.addEventListener('click',e=>{const detail=e.target.closest('[data-detail]');if(detail){openDetail(detail.dataset.detail);return;}const download=e.target.closest('[data-export-logs]');if(download){void window.taskMonitor.exportLogs(download.dataset.exportLogs);return;}const command=e.target.closest('[data-command]');if(command)void perform(command.dataset.command,command.dataset.id);});
+// 直接聚焦当前页标题，以便键盘和读屏用户越过导航，同时保留当前页的路由地址。
+$('#skip-nav').addEventListener('click', () => {
+  const heading = document.querySelector('main .view:not(.hidden) h1');
+  heading.tabIndex = -1;
+  heading.focus();
+});
 $('#close-dialog').addEventListener('click',()=>{$('#task-dialog').close();detailId=null;});
 $('#conflict-close').addEventListener('click',()=>{if(!conflictBusy)$('#task-conflict-dialog').close();});
 $('#task-conflict-dialog').addEventListener('cancel',event=>{if(conflictBusy)event.preventDefault();});
@@ -499,4 +505,70 @@ function tickClock(){$('#clock').textContent=new Date().toLocaleString('zh-CN',{
 regions();updateForm();renderBrowser();tickClock();void refresh();setInterval(()=>void refresh(),2000);setInterval(tickClock,30000);
 // 倒计时只更新文字节点，队列和日志仍沿用原有的状态刷新与滚动保持。
 setInterval(()=>window.taskMonitor.tick(),1000);
+
+// 只管理信息提示的呈现：支持悬停、键盘和触屏，不介入表单或任务流程。
+(() => {
+  const tooltip = document.getElementById('ui-help-tooltip');
+  let active = null, previousDescription = null, pinned = false, closeTimer;
+  const triggerFor = target => target instanceof Element ? target.closest('.info-button[data-help]') : null;
+  const cancelClose = () => clearTimeout(closeTimer);
+  function close() {
+    cancelClose();
+    if (active) {
+      if (previousDescription === null) active.removeAttribute('aria-describedby');
+      else active.setAttribute('aria-describedby', previousDescription);
+    }
+    active = null; pinned = false; tooltip.hidden = true;
+  }
+  function open(trigger) {
+    cancelClose();
+    if (active !== trigger) {
+      close(); active = trigger;
+      previousDescription = trigger.getAttribute('aria-describedby');
+      trigger.setAttribute('aria-describedby', [previousDescription, tooltip.id].filter(Boolean).join(' '));
+    }
+    // 模态窗口在浏览器顶层，提示需随之放入窗口内才能被看见。
+    (trigger.closest('dialog') || document.body).append(tooltip);
+    tooltip.textContent = trigger.dataset.help;
+    tooltip.hidden = false;
+    const rect = trigger.getBoundingClientRect();
+    const box = tooltip.getBoundingClientRect();
+    tooltip.style.left = Math.max(12, Math.min(rect.left + (rect.width - box.width) / 2, innerWidth - box.width - 12)) + 'px';
+    tooltip.style.top = Math.max(12, rect.bottom + box.height + 20 <= innerHeight ? rect.bottom + 8 : rect.top - box.height - 8) + 'px';
+  }
+  function scheduleClose() {
+    if (!pinned && document.activeElement !== active) closeTimer = setTimeout(close, 140);
+  }
+  document.addEventListener('pointerover', event => {
+    if (event.pointerType === 'touch') return;
+    const trigger = triggerFor(event.target);
+    if (trigger && !trigger.disabled) open(trigger);
+    else if (tooltip.contains(event.target)) cancelClose();
+  });
+  document.addEventListener('pointerout', event => {
+    if (triggerFor(event.target) === active || tooltip.contains(event.target)) scheduleClose();
+  });
+  document.addEventListener('focusin', event => {
+    const trigger = triggerFor(event.target);
+    if (trigger) open(trigger);
+    else if (active) close();
+  });
+  document.addEventListener('focusout', event => {
+    if (triggerFor(event.target) === active && !triggerFor(event.relatedTarget)) close();
+  });
+  document.addEventListener('click', event => {
+    const trigger = triggerFor(event.target);
+    if (trigger && !trigger.disabled) {
+      if (active === trigger && pinned) close();
+      else { open(trigger); pinned = true; }
+    } else if (!tooltip.contains(event.target)) close();
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && active) {
+      close(); event.preventDefault(); event.stopPropagation();
+    }
+  }, true);
+  document.addEventListener('scroll', close, true);
+  window.addEventListener('resize', close);
+})();
 

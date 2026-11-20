@@ -32,12 +32,12 @@
 
 - **系统：**Windows 10/11 x64。连接 AutoDL 需要联网，本机无需独立显卡。
 - **环境：**上述方式均无需提前安装 Node.js、npm 或 Git。网页版会按需下载运行环境和浏览器组件。
-- **下载版本：**本文链接对应 [v2.0.1 正式版](https://github.com/Starry-cz/autodl-assistant/releases/tag/v2.0.1)。
+- **下载版本：**本文链接对应 [v2.0.2 正式版](https://github.com/Starry-cz/autodl-assistant/releases/tag/v2.0.2)。
 
 <a id="method-1"></a>
 ### 1. EXE 安装包
 
-1. [下载桌面安装包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.1/autodl-assistant-desktop-2.0.1-setup-x64.exe)。文件名以 **setup-x64.exe** 结尾。
+1. [下载桌面安装包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.2/autodl-assistant-desktop-2.0.2-setup-x64.exe)。文件名以 **setup-x64.exe** 结尾。
 2. 双击 EXE，等待安装完成。程序安装到当前 Windows 用户，无需管理员权限。
 3. 打开桌面或开始菜单中的 **AutoDL助手桌面版**，按[开始使用](#first-use)连接账号。
 4. **以后启动：**打开 **AutoDL助手桌面版** 快捷方式。
@@ -48,7 +48,7 @@
 <a id="method-2"></a>
 ### 2. 便携 ZIP
 
-1. [下载完整便携包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.1/autodl-assistant-desktop-2.0.1-win-x64.zip)。文件名以 **win-x64.zip** 结尾。
+1. [下载完整便携包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.2/autodl-assistant-desktop-2.0.2-win-x64.zip)。文件名以 **win-x64.zip** 结尾。
 2. 右键 ZIP，选择 **全部解压**，保存到有写入权限的固定文件夹。
 3. 打开解压后的文件夹，双击 **AutoDL Assistant.exe**，按[开始使用](#first-use)连接账号。
 4. **以后启动：**打开该文件夹中的 **AutoDL Assistant.exe**，也可为它创建桌面快捷方式。
@@ -59,7 +59,7 @@
 <a id="method-3"></a>
 ### 3. 源码 ZIP
 
-1. [下载完整源码包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.1/autodl-assistant-v2.0.1.zip)。
+1. [下载完整源码包](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.2/autodl-assistant-v2.0.2.zip)。
 2. 右键 ZIP，选择 **全部解压**，保存到有写入权限的固定目录，例如 `D:\AutoDL助手`。
 3. 打开项目文件夹，找到 **启动抢卡助手.cmd**；同一层应有 `package.json`、`public`、`src` 和 `scripts`。
 4. 双击 **启动抢卡助手.cmd**。保持联网，等待环境准备完成并显示“启动成功”。
@@ -72,7 +72,7 @@
 <a id="method-4"></a>
 ### 4. 单文件在线安装
 
-1. [下载在线安装文件](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.1/autodl-assistant-setup.cmd)：**autodl-assistant-setup.cmd**。
+1. [下载在线安装文件](https://github.com/Starry-cz/autodl-assistant/releases/download/v2.0.2/autodl-assistant-setup.cmd)：**autodl-assistant-setup.cmd**。
 2. 双击该文件并保持联网，等待程序与运行环境下载完成。
 3. 默认安装到 `%LOCALAPPDATA%\AutoDL-Assistant`。将此路径粘贴到资源管理器地址栏即可打开安装目录。
 4. 出现“安装和启动完成”后，浏览器会打开助手页面，按[开始使用](#first-use)连接账号。
@@ -88,7 +88,7 @@
 2. 复制下面的命令到 PowerShell，按回车下载安装脚本：
 
    ```powershell
-   Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Starry-cz/autodl-assistant/v2.0.1/install.ps1" -OutFile "$env:TEMP\install-autodl.ps1"
+   Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Starry-cz/autodl-assistant/v2.0.2/install.ps1" -OutFile "$env:TEMP\install-autodl.ps1"
    ```
 
 3. 下载完成后，执行第二条命令：
@@ -120,7 +120,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\install-autod
 
 1. 点击 **返回工作台**，打开 **监控室**。
 2. 选择刷新间隔，开始或暂停自动跟踪。
-3. 点击型号、地区或热力图格子，筛选下方主机明细。点击 **用于抢卡** 可将条件填入任务配置。
+3. 点击型号、地区或热力图格子，筛选下方主机明细。点击 **填入抢卡配置** 可将条件填入任务配置。
 
 ### 创建抢卡任务
 

@@ -20,10 +20,10 @@
   const set = (id, value) => { const el = document.getElementById(id); if(el.textContent !== String(value))el.textContent = value; };
   const html = (id, value) => { const el = document.getElementById(id); if(el._rendered !== value){el.innerHTML = value;el._rendered = value;} };
   const go = view => document.querySelector('.nav-item[data-view="' + view + '"]').click();
-  const official = '<a class="button small" href="https://www.autodl.com/console/instance/list" target="_blank" rel="noopener noreferrer">官网管理 ↗</a>';
+  const official = '<a class="button small" href="https://www.autodl.com/console/instance/list" target="_blank" rel="noopener noreferrer" aria-label="前往 AutoDL 官网管理实例（新窗口）">官网管理 <span aria-hidden="true">↗</span></a>';
   function statusText() {
     if(!ready())return '请先连接 AutoDL';
-    if(pending)return pending === 'billing' ? '正在同步近 35 天账单…' : '正在同步实例、资源与余额…';
+    if(pending)return pending === 'billing' ? '正在同步账单…' : '正在同步实例…';
     const data = overview();
     if(data?.error)return '部分数据未确认：' + data.error;
     if(!data?.checkedAt)return '点击同步我的实例';
@@ -42,7 +42,7 @@
     html('overview-gpus', target ? '<div class="data-row"><div><strong>' + esc(target.gpuModel || '型号未知') + ' × ' + number(target.gpuCount) + '</strong><p>' + esc(target.region || '区域未知') + ' · ' + esc(target.machineId || '主机编号未知') + '</p></div><span class="badge neutral">' + esc(target.statusLabel) + '</span></div>' : empty('请选择监控实例'));
     const watching = (appState.tasks || []).filter(t => t.config.mode === 'boot' && t.config.sourceId === targetId && t.config.action === 'execute' && active(t));
     const options = '<option value="">选择监控实例</option>' + rows.map(i => '<option value="' + esc(i.id) + '"' + (i.id === targetId ? ' selected' : '') + '>' + esc(i.name || i.id) + ' · ' + esc(i.gpuModel || '型号未知') + '</option>').join('');
-    html('overview-targets', '<div class="overview-target-picker"><label>监控目标<select id="overview-target-select" aria-label="监控目标">' + options + '</select></label><button type="button" class="button" data-configure-boot="' + esc(targetId) + '"' + (!target || !ready() ? ' disabled' : '') + '>配置自动开机</button></div><p class="hint">' + (watching.length ? '开机任务：' + esc(watching.map(t => STATES[t.state] || t.state).join('、')) : '自动开机未启用') + '</p>');
+    html('overview-targets', '<div class="overview-target-picker"><label>监控目标<select id="overview-target-select" aria-label="监控目标">' + options + '</select></label><button type="button" class="button" data-configure-boot="' + esc(targetId) + '"' + (!target || !ready() ? ' disabled' : '') + '>配置开机任务</button></div><span class="badge neutral overview-automation-state">' + (watching.length ? '开机任务：' + esc(watching.map(t => STATES[t.state] || t.state).join('、')) : '自动开机未启用') + '</span>');
     html('overview-resources', target ? resourceReadings(target) : empty('请选择监控实例'));
     const activity = (appState.notifications || []).slice(0, 6);
     html('overview-activity', activity.length ? activity.map(n => '<article class="activity-row"><div><h3>' + esc(n.name) + '</h3><p>' + esc(n.message) + '</p></div><time>' + when(n.at) + '</time></article>').join('') : empty('暂无任务动态'));
@@ -72,7 +72,7 @@
       ? new Set([...list.querySelectorAll('details[data-instance-details][open]')].map(node => node.dataset.instanceDetails)) : new Set();
     list._detailsOwner = targetOwner;
     html('fleet-list', rows.length ? rows.map(fleetInstanceRow).join('')
-      : empty(data?.checkedAt ? all.length ? '没有符合筛选条件的实例。' : '当前账号没有实例。' : '点击“同步实例”读取当前账号。'));
+      : empty(data?.checkedAt ? all.length ? '没有符合条件的实例' : '暂无实例' : '请同步实例'));
     for (const detail of list.querySelectorAll('details[data-instance-details]')) detail.open = opened.has(detail.dataset.instanceDetails);
   }
   function fleetField(label, value) {
@@ -81,14 +81,14 @@
   function fleetCapacity(value, unit) {
     if (Number.isFinite(value) && value > 0) return number(value, unit);
     // 关机等状态可能返回 0；这不能证明该实例的真实配置就是零容量。
-    return value === 0 ? '平台返回 0，分配情况待确认' : '平台未提供';
+    return value === 0 ? '分配待确认（返回 0）' : '平台未提供';
   }
   function fleetInstanceRow(instance) {
     const name = typeof instance.name === 'string' ? instance.name.trim() : '';
     const model = typeof instance.gpuModel === 'string' ? instance.gpuModel.trim() : '';
     const gpu = (model || '型号待确认') + (Number.isFinite(instance.gpuCount) && instance.gpuCount > 0 ? ' × ' + number(instance.gpuCount) : '');
     const primary = [['GPU', gpu], ['地区', instance.region || '地区待确认']];
-    const details = [['完整实例 ID', instance.id || '平台未提供'], ['主机编号', instance.machineId || '平台未提供'],
+    const details = [['实例 ID', instance.id || '平台未提供'], ['主机编号', instance.machineId || '平台未提供'],
       ['CPU', fleetCapacity(instance.cpuCores, ' 核')], ['内存', fleetCapacity(instance.memoryGiB, ' GiB')]];
     // 已确认磁盘配置直接显示；缺失容量放进详情，主列表不堆叠未知占位。
     for (const [label, value] of [['系统盘', instance.systemDiskGiB], ['数据盘', instance.dataDiskGiB]]) {
@@ -101,13 +101,13 @@
       + '<details class="fleet-disclosure" data-instance-details="' + esc(instance.id) + '"><summary>实例详情</summary>'
       + '<dl class="fleet-detail-fields">' + details.map(([label, value]) => fleetField(label, value)).join('') + '</dl></details></div>'
       + '<div class="fleet-actions"><button class="button small" type="button" data-monitor-instance="' + esc(instance.id) + '">' + (instance.id === targetId ? '查看监控' : '设为监控目标') + '</button>'
-      + '<button class="button small" type="button" data-configure-boot="' + esc(instance.id) + '">配置开机</button>' + official + '</div></article>';
+      + '<button class="button small" type="button" data-configure-boot="' + esc(instance.id) + '">配置开机任务</button>' + official + '</div></article>';
   }
   function renderBilling() {
     const data = bills(), wallet = overview()?.wallet;
     set('billing-updated', when(data?.checkedAt));
     set('billing-balance', moneyMilli(wallet?.balanceMilli));set('billing-voucher', moneyMilli(wallet?.vouchersMilli));set('billing-blocked', moneyMilli(wallet?.blockedMilli));
-    set('billing-status', !ready() ? '请先连接 AutoDL' : pending === 'billing' ? '正在同步账单…' : data?.error ? (data.complete === false ? '账单仍有未确认数据：' : '同步失败，保留上次结果：') + data.error : data?.checkedAt ? '净消费 = 消费 − 退款' : '点击同步账单');
+    set('billing-status', !ready() ? '请先连接 AutoDL' : pending === 'billing' ? '正在同步账单…' : data?.error ? (data.complete === false ? '账单仍有未确认数据：' : '同步失败，保留上次结果：') + data.error : data?.checkedAt ? '账单已同步' : '请同步账单');
     const daily = [...(data?.daily || [])].sort((a,b) => a.date.localeCompare(b.date));
     const last = daily.at(-1)?.date || '', month = last.slice(0,7), period = daily.slice(-range);
     const sum = rows => rows.length && rows.every(r => r.complete && Number.isFinite(r.amountMilli)) ? rows.reduce((n,r) => n + r.amountMilli,0) : null;
@@ -123,7 +123,7 @@
       const name = item.typeLabel || (item.type === 'refund' ? '退款' : '消费');
       if(Number.isFinite(item.amountMilli))groups.set(name,(groups.get(name)||0) + item.amountMilli);
     }
-    html('billing-breakdown', groups.size ? '<table class="ledger-table"><caption>近 ' + range + ' 天' + (partial ? '已读取' : '') + '消费构成</caption><thead><tr><th>项目</th><th>金额</th></tr></thead><tbody>' + [...groups].map(([name,amount]) => '<tr><td>' + esc(name) + '</td><td>' + moneyMilli(amount) + '</td></tr>').join('') + '</tbody></table>' : empty(data?.checkedAt ? '当前区间没有可归类的消费记录。' : '同步后查看消费构成。'));
+    html('billing-breakdown', groups.size ? '<table class="ledger-table"><caption class="visually-hidden">近 ' + range + ' 天' + (partial ? '已读取' : '') + '消费构成</caption><thead><tr><th scope="col">项目</th><th scope="col">金额</th></tr></thead><tbody>' + [...groups].map(([name,amount]) => '<tr><td>' + esc(name) + '</td><td>' + moneyMilli(amount) + '</td></tr>').join('') + '</tbody></table>' : empty(data?.checkedAt ? '暂无可归类的消费' : '请同步账单'));
     const recent = [...items].sort((a,b) => b.at - a.at).slice(0,50);
     renderTransactions(recent, !!data?.checkedAt);
   }
@@ -133,14 +133,14 @@
     const shown = ledgerExpanded ? recent : recent.slice(0, LEDGER_PREVIEW_ROWS);
     const button = $('#billing-transactions-toggle'), list = $('#billing-transactions');
     button.hidden = !hasMore;
-    button.textContent = ledgerExpanded ? '收起流水' : '展开最近 ' + recent.length + ' 条';
+    button.textContent = ledgerExpanded ? '收起流水' : '查看全部（' + recent.length + '）';
     button.setAttribute('aria-expanded', String(ledgerExpanded));
     list.classList.toggle('is-expanded', ledgerExpanded);
     $('#billing-transactions-count').hidden = !recent.length;
     set('billing-transactions-count', recent.length
       ? (ledgerExpanded || !hasMore ? '最近 ' + recent.length + ' 条' : '显示 ' + shown.length + ' / ' + recent.length + ' 条') + (recent.some(i => i.date === null) ? ' · 含日期待确认项' : '')
-      : synced ? '当前区间暂无流水。' : '同步后查看近期流水。');
-    html('billing-transactions', shown.length ? '<table class="ledger-table" aria-label="近期流水"><thead><tr><th scope="col">北京时间</th><th scope="col">项目 / 实例</th><th scope="col">类型</th><th scope="col">金额</th></tr></thead><tbody>' + shown.map(i => '<tr><td>' + (i.at ? when(i.at) : '日期未知') + '</td><td>' + esc(i.name || i.instanceId || '—') + '</td><td>' + esc(i.typeLabel || i.type) + '</td><td>' + moneyMilli(Number.isFinite(i.amountMilli) ? i.amountMilli : i.transactionMilli) + '</td></tr>').join('') + '</tbody></table>' : empty(synced ? '当前区间暂无流水。' : '同步后查看近期流水。'));
+      : synced ? '暂无流水' : '请同步账单');
+    html('billing-transactions', shown.length ? '<table class="ledger-table" aria-label="近期流水"><thead><tr><th scope="col">北京时间</th><th scope="col">项目 / 实例</th><th scope="col">类型</th><th scope="col">金额</th></tr></thead><tbody>' + shown.map(i => '<tr><td>' + (i.at ? when(i.at) : '日期未知') + '</td><td>' + esc(i.name || i.instanceId || '—') + '</td><td>' + esc(i.typeLabel || i.type) + '</td><td>' + moneyMilli(Number.isFinite(i.amountMilli) ? i.amountMilli : i.transactionMilli) + '</td></tr>').join('') + '</tbody></table>' : empty(synced ? '暂无流水' : '请同步账单'));
   }
   function renderChart(rows) {
     if(!rows.length){html('billing-chart','');$('#billing-chart-tooltip').hidden = true;return;}

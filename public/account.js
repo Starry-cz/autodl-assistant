@@ -15,7 +15,7 @@ function pricingWaitMessage(snapshot) {
     return '暂无满足所选数量的空闲 GPU。单卡价仅供参考，可先开始监测。';
   if(availability?.status==='no_match') {
     const reasons=(availability.reasons||[]).map(item=>item.reason+'（'+item.count+' 台）').join('、');
-    return '已读取 '+availability.scannedHosts+' 台主机，暂无符合全部条件的资源'+(reasons?'：'+reasons:'')+'。可先开始监测。';
+    return '已检查 '+availability.scannedHosts+' 台主机，暂无匹配资源'+(reasons?'：'+reasons:'')+'。';
   }
   if(availability?.status==='empty')return '尚未读到主机，请检查地区选择后重试。';
   return '暂无完整报价，可先开始监测。';
@@ -29,11 +29,12 @@ function renderPricing() {
   // 只突出单卡每小时；读到完整配置报价后，下方一行再写配置总价（多卡时注明卡数）与磁盘日费。
   $('#price-unit').textContent=unit;$('#price-hourly').textContent=money(quote?.hourly);$('#price-storage').textContent=money(quote?.storageDaily);
   $('#price-cards').textContent=quote&&quote.gpuCount>1?'（'+quote.gpuCount+' 卡）':'';$('#price-detail').hidden=!quote;
-  $('#price-status').textContent=accountBusy==='pricing'?'正在读取报价…':pricingError?'读取失败：'+pricingError:expired?'报价已过期，请重新读取。':quote?quote.region+' 报价已更新，提交时重新核对。':snapshot?pricingWaitMessage(snapshot):'选好配置后可读取报价。';
-  $('#price-source').textContent=snapshot?'更新于 '+time(snapshot.checkedAt,true):'尚未读取';
+  // 按钮已表达读取动作；状态只显示报价结果、进度或异常，避免重复说明。
+  $('#price-status').textContent=accountBusy==='pricing'?'正在读取报价…':pricingError?'读取失败：'+pricingError:expired?'报价已过期，请重新读取。':quote?quote.region+' · 提交时重新核对报价。':snapshot?pricingWaitMessage(snapshot):'';
+  $('#price-source').textContent=snapshot?'更新于 '+time(snapshot.checkedAt,true):'';
   const button=$('#refresh-pricing');
   button.disabled=!!accountBusy||!!browserAction||(!accountReady()||!!appState.browser?.busy);
-  button.textContent=accountBusy==='pricing'?'读取中…':'读取 AutoDL 官方报价';
+  button.textContent=accountBusy==='pricing'?'读取中…':'读取报价';
 }
 const money = n => Number.isFinite(n) ? '¥' + n.toFixed(3) : '—';
 function accountReady() { return appState.browser?.session?.state === 'ready' && appState.browser.session.browserOpen && (!appState.account?.enabled || !!appState.account.identity); }
@@ -60,7 +61,7 @@ function updateAccountForm() {
     if(appliedSource!==currentMode+':'+source.id){keepGpuModel(source.gpuModel,'源实例型号');form.elements.gpuCount.value=String(source.gpuCount);appliedSource=currentMode+':'+source.id;}
     updateGpuSelection();
     const model=selectedGpuModel(),changed=!!model&&(gpuIdentity(model)!==gpuIdentity(source.gpuModel)||form.elements.gpuCount.value!==String(source.gpuCount));
-    const text=boot?source.id+' · '+source.region+' · '+source.gpuModel+' × '+source.gpuCount+'。沿用原配置与计费方式。'+(source.starting?'正在开机，等待确认。':source.status==='运行中'?'已运行，需核对 GPU 状态。':source.gpuAvailable===false?'GPU 不足，将持续等待。':source.gpuAvailable===true?'GPU 可用，执行前重新核对。':'启动监测后检查 GPU 库存。'):source.id+' · '+source.region+' · '+source.gpuModel+' × '+source.gpuCount+'。同地区克隆，可更换 GPU 型号与数量，源实例保留。'
+    const text=boot?source.region+' · '+source.gpuModel+' × '+source.gpuCount+'。沿用原配置与计费。'+(source.starting?'正在开机，等待确认。':source.status==='运行中'?'已运行，需核对 GPU 状态。':source.gpuAvailable===false?'GPU 不足，等待空卡。':source.gpuAvailable===true?'GPU 可用，执行前重新核对。':'启动监测后检查 GPU 库存。'):source.region+' · '+source.gpuModel+' × '+source.gpuCount+'。同地区克隆，源实例保留。'
       +(changed?'已改为 '+model+' × '+form.elements.gpuCount.value+'，请确认源环境兼容目标 GPU。':'');
     if($('#source-summary').textContent!==text)$('#source-summary').textContent=text;
   } else if(locked) $('#source-summary').textContent=boot?'请选择原实例；无卡运行中的实例需先在官网关机。':'请选择地区和型号可识别的已关机实例。';
@@ -79,7 +80,7 @@ function renderBudget() {
   const f=$('#task-form'),wallet=appState.wallet||{},s=wallet.snapshot,quote=currentQuote();
   const hours=Number(f.elements.expectedHours.value),reserve=Number(f.elements.balanceReserve.value),node=$('#budget-status');
   node.classList.remove('error');
-  if(!f.elements.balanceGuard.checked){node.textContent='未启用余额保护。';return;}
+  if(!f.elements.balanceGuard.checked){node.textContent='';return;}
   if(!Number.isFinite(hours)||hours<=0||!Number.isFinite(reserve)||reserve<0){node.textContent='请填写有效的预计运行时长和保留余额。';return;}
   if(!quote){
     node.textContent=!wallet.configured?'请在账单页配置余额 Token，或关闭余额保护。':'暂无完整报价，仍可先启用监测；提交前检查预算。';
@@ -101,11 +102,11 @@ function renderAccount() {
     const placeholder=new Option(sync.checkedAt?(boot?'请选择要开机的原实例':'请选择已关机的源实例'):'请先同步 AutoDL 实例','');placeholder.disabled=true;
     const options=rows.map(i=>{const option=new Option(i.id+' · '+(i.region||'地区未知')+' · '+(i.gpuModel||'型号未知')+' × '+(i.gpuCount??'?')+' · '+i.status,i.id);option.disabled=!(boot?i.bootable:i.cloneable)||!!sync.error||!accountReady();return option;});
     select.replaceChildren(placeholder,...options);select.value=options.some(o=>o.value===selected&&!o.disabled)?selected:'';
-    $('#account-instances').innerHTML=rows.length?rows.map(i=>'<article class="instance-row"><div><strong>'+esc(i.gpuModel||'型号待核对')+' × '+esc(i.gpuCount??'?')+'</strong><span>'+esc(i.region||'地区待核对')+' · '+esc(i.status)+'</span><small>'+esc(i.id)+'</small>'+(i.bootReason?'<small class="instance-reason">'+esc(i.bootReason)+'</small>':'')+'</div><div class="instance-actions"><button type="button" class="button primary small" data-boot="'+esc(i.id)+'"'+(!i.bootable||sync.error||!accountReady()?' disabled':'')+'>等待有卡开机</button><button type="button" class="button small" data-source="'+esc(i.id)+'"'+(!i.cloneable||sync.error||!accountReady()?' disabled':'')+'>用作克隆源</button></div></article>').join(''):'<p class="hint">'+(sync.checkedAt?'当前账号没有实例。':'登录后同步实例。')+'</p>';
+    $('#account-instances').innerHTML=rows.length?rows.map(i=>'<article class="instance-row"><div><strong>'+esc(i.gpuModel||'型号待核对')+' × '+esc(i.gpuCount??'?')+'</strong><span>'+esc(i.region||'地区待核对')+' · '+esc(i.status)+'</span><small>'+esc(i.id)+'</small>'+(i.bootReason?'<small class="instance-reason">'+esc(i.bootReason)+'</small>':'')+'</div><div class="instance-actions"><button type="button" class="button primary small" data-boot="'+esc(i.id)+'"'+(!i.bootable||sync.error||!accountReady()?' disabled':'')+'>配置开机</button><button type="button" class="button small" data-source="'+esc(i.id)+'"'+(!i.cloneable||sync.error||!accountReady()?' disabled':'')+'>用作克隆源</button></div></article>').join(''):'<p class="hint">'+(sync.checkedAt?'当前账号没有实例。':'登录后同步实例。')+'</p>';
   }
-  $('#instances-status').textContent=sync.error?'同步失败：'+sync.error:sync.checkedAt?rows.length+' 个实例 · 更新于 '+time(sync.checkedAt,true):'同步实例后可选择开机或克隆来源。';
+  $('#instances-status').textContent=sync.error?'同步失败：'+sync.error:sync.checkedAt?rows.length+' 个实例 · 更新于 '+time(sync.checkedAt,true):'';
   const busy=!!accountBusy||!!appState.browser?.busy||!!browserAction;
-  for(const id of ['sync-instances','refresh-sources']){const b=$('#'+id);b.disabled=busy||!accountReady();b.textContent=accountBusy==='instances'?'正在同步…':id==='sync-instances'?'同步实例':'同步实例列表';}
+  for(const id of ['sync-instances','refresh-sources']){const b=$('#'+id);b.disabled=busy||!accountReady();b.textContent=accountBusy==='instances'?'正在同步…':'同步实例';}
   const wallet=appState.wallet||{},s=wallet.snapshot;
   $('#wallet-balance').textContent=money(s?.balance);$('#wallet-vouchers').textContent=money(s?.vouchers);
   $('#wallet-status').textContent=wallet.lastError?'余额查询失败：'+wallet.lastError:s?'最近查询 '+time(s.checkedAt,true)+(wallet.stale?' · 已过期，请刷新':''):wallet.configured?'Token 已连接，请查询余额。':'余额 Token 尚未连接。';

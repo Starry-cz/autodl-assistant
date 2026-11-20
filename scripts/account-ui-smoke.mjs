@@ -78,14 +78,14 @@ try {
  await field('expectedHours').fill('2');await field('balanceReserve').fill('1');await page.locator('#refresh-pricing').click();await page.waitForFunction(()=>document.querySelector('#price-hourly').textContent==='¥3.960');assert.match(await page.locator('#budget-status').textContent(),/余额不足/);
  // 旧后台缺少报价接口：提供可执行的重启说明，清除旧报价，恢复接口后可再次读取。
  pricingInterfaceMissing=true;await page.locator('#refresh-pricing').click();
- await page.waitForFunction(()=>document.querySelector('#price-status').textContent.includes('旧版代码'));
- assert.match(await page.locator('#price-status').textContent(),/正常停止旧后台/);assert.match(await page.locator('#price-status').textContent(),/npm\.cmd start/);
+ await page.waitForFunction(()=>document.querySelector('#price-status').textContent.includes('后台版本不匹配'));
+ assert.match(await page.locator('#price-status').textContent(),/正常退出/);assert.match(await page.locator('#price-status').textContent(),/重新启动/);
  for(const selector of ['#price-unit','#price-hourly','#price-storage'])assert.equal(await page.locator(selector).textContent(),'—');
  assert.equal(app.store.tasks().length,0);assert.equal(forbiddenCalls,0);
  pricingInterfaceMissing=false;await page.locator('#refresh-pricing').click();await page.waitForFunction(()=>document.querySelector('#price-hourly').textContent==='¥3.960');assert.equal(await page.locator('#price-detail').isVisible(),true);assert.equal(await page.locator('#price-cards').textContent(),'（2 卡）');
  // 普通的不存在任务仍应显示原错误，不被误判为后台版本问题。
  const missingTask=await page.evaluate(async()=>{try{await api('/api/tasks/missing-task/pause',{});return null;}catch(error){return {message:error.message,status:error.status,code:error.code};}});
- assert.equal(missingTask.status,404);assert.equal(missingTask.message.includes('旧版代码'),false);
+ assert.equal(missingTask.status,404);assert.equal(missingTask.message.includes('后台版本不匹配'),false);
 
  await page.locator('#submit-task').click();await page.waitForFunction(()=>document.querySelector('#toast').textContent.includes('低于本次预检所需'));assert.equal(app.store.tasks().length,0);
  assets=100000;await walletPanel();await page.locator('#refresh-wallet').click();await page.waitForFunction(()=>document.querySelector('#wallet-balance').textContent==='¥100.000');await view('dashboard');await page.locator('#check-budget').click();await page.waitForFunction(()=>document.querySelector('#toast').textContent.includes('余额预检通过'));await page.locator('#submit-task').click();await page.waitForFunction(()=>document.querySelector('#task-count').textContent==='1');

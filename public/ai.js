@@ -20,7 +20,7 @@ function aiRenderState(force = false) {
   const settings = appState.ai;
   if (!aiSettingsLoaded || force) { aiShowSettings(settings); aiSettingsLoaded = true; aiSettingsDirty = false; }
   const storage=appState.credentialStorage;
-  if(storage){aiSettingsForm.elements.rememberKey.disabled=!storage.available;if(!storage.available)aiSettingsForm.elements.rememberKey.checked=false;$('#ai-storage-hint').textContent=storage.available?'勾选后在本机加密保存；否则仅本次运行有效。':'此系统不支持加密保存，Key 仅本次运行有效。';}
+  if(storage){aiSettingsForm.elements.rememberKey.disabled=!storage.available;if(!storage.available)aiSettingsForm.elements.rememberKey.checked=false;$('#ai-storage-hint').textContent=storage.available?'':'此系统不支持加密保存，Key 仅本次运行有效。';}
   const busy = aiBusyLocal || settings.busy;
   $('#ai-status').textContent = busy ? '分析中' : settings.ready ? '已配置' : settings.enabled ? '等待 API Key' : '未启用';
   $('#ai-key-status').textContent = settings.hasKey ? (settings.rememberKey ? '已记住 API Key。' : 'API Key 已配置，重启后需重新填写。') : '尚未配置 API Key。';
@@ -77,16 +77,17 @@ $('#ai-project-file').addEventListener('change', async event => {
 for (const name of ['request', 'projectText', 'errorText', 'mode'])
   aiAnalysisForm.elements[name].addEventListener('input', () => { aiAnalysisForm.elements.consent.checked = false; });
 function aiList(title, items, render) {
-  return '<div class="ai-result-section"><h3>' + esc(title) + '</h3>' + (items.length ? '<ul>' + items.map(item => '<li>' + render(item) + '</li>').join('') + '</ul>' : '<p class="hint">无</p>') + '</div>';
+  // 没有内容的结果分组不占位；实际建议、疑问和风险仍完整呈现。
+  return items.length ? '<div class="ai-result-section"><h3>' + esc(title) + '</h3><ul>' + items.map(item => '<li>' + render(item) + '</li>').join('') + '</ul></div>' : '';
 }
 function aiRenderResult(result, meta) {
   const panel = $('#ai-results'); panel.hidden = false;
   const usage = meta.usage?.total_tokens;
-  panel.innerHTML = '<h2>分析建议 · 待人工核对</h2><p class="hint">' + esc(meta.model) + ' · ' + esc((meta.elapsedMs / 1000).toFixed(1)) + ' 秒' + (usage === undefined ? '' : ' · ' + esc(usage) + ' Token（服务商返回）') + '</p>' +
-    '<p class="ai-summary">' + esc(result.summary) + '</p><p class="notice">引用仅核对原文，结论需在目标实例验证。</p>' +
+  panel.innerHTML = '<h2>分析建议 <button type="button" class="info-button" aria-label="分析建议的核验范围" data-help="引用仅与输入原文比对，结论仍需在目标实例验证。"><span aria-hidden="true">i</span></button></h2><p class="hint">' + esc(meta.model) + ' · ' + esc((meta.elapsedMs / 1000).toFixed(1)) + ' 秒' + (usage === undefined ? '' : ' · ' + esc(usage) + ' Token') + '</p>' +
+    '<p class="ai-summary">' + esc(result.summary) + '</p>' +
     aiList('发现与依据', result.findings, item => '<p>' + esc(item.message) + '</p><small class="' + (item.evidenceMatched ? 'ai-evidence' : 'ai-uncertain') + '">' + (item.evidenceMatched ? '输入原文匹配：' : '未验证依据：') + esc(item.evidence || '未提供原文引用，请视为待验证假设') + '</small>') +
-    aiList('建议与核验方法', result.recommendations, item => '<p><strong>' + esc(item.action) + '</strong></p><p>' + esc(item.reason) + '</p><small>如何核验：' + esc(item.verification) + '</small>') +
-    aiList('需要补充的信息', result.questions, esc) + aiList('限制与提醒', result.warnings, esc);
+    aiList('建议与验证', result.recommendations, item => '<p><strong>' + esc(item.action) + '</strong></p><p>' + esc(item.reason) + '</p><small>验证：' + esc(item.verification) + '</small>') +
+    aiList('待补充', result.questions, esc) + aiList('风险与限制', result.warnings, esc);
 }
 aiAnalysisForm.addEventListener('submit', async event => {
   event.preventDefault();

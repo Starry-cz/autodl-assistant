@@ -29,6 +29,9 @@
   function render() {
     const changed = dirty(), loading = savedSignature === null;
     form.setAttribute('aria-busy', String(!!busy));
+    // 保存方式常驻说明已收进信息提示；不支持加密时仍明确解释禁用原因。
+    $('#notification-storage-hint').textContent = appState.credentialStorage?.available === false
+      ? '此系统不支持加密保存，通知凭据仅本次运行有效。' : '';
     // 存储能力与请求锁统一由此管理，避免账号心跳或编辑其他字段时错误解锁。
     for (const name of fields) form.elements[name].disabled = !!busy || loading
       || (name === 'rememberCredentials' && appState.credentialStorage?.available === false);

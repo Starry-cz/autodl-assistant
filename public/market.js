@@ -32,8 +32,8 @@
       + '<circle class="market-ring-track" cx="100" cy="100" r="64" fill="none" stroke-width="15"/>'
       + (known ? '<circle class="market-ring-fill" cx="100" cy="100" r="64" fill="none" stroke-width="15" stroke-dasharray="' + circumference + '" stroke-dashoffset="' + circumference * (1 - percent / 100) + '" transform="rotate(-90 100 100)"/>' : '')
       + '<text class="market-ring-value" x="100" y="98" text-anchor="middle">' + esc(percentText) + '</text>'
-      + '<text class="market-ring-label" x="100" y="124" text-anchor="middle">目录可用比例</text></svg>'
-      + '<p class="market-chart-note">' + (summary?.complete ? numeric(summary.available) + ' 可用 / ' + numeric(summary.total) + ' 总计' : '完整同步后计算比例') + '</p>';
+      + '<text class="market-ring-label" x="100" y="124" text-anchor="middle">可用率</text></svg>'
+      + '<p class="market-chart-note">' + (summary?.complete ? '<strong>' + numeric(summary.available) + '</strong> 空闲 / ' + numeric(summary.total) + ' 总数' : '等待完整库存') + '</p>';
   }
 
   function barList(rows, kind) {
@@ -73,7 +73,7 @@
   }
 
   function trend(history) {
-    if (!history?.some(point => point.complete)) return empty('同步库存后开始记录趋势');
+    if (!history?.some(point => point.complete)) return empty('暂无趋势数据');
     // 宽度取实际栏宽，高度由响应式样式指定，避免缩放字体或由 SVG 高度反算自身。
     const chart = element('market-trend');
     const width = Math.max(200, chart.clientWidth), height = parseFloat(getComputedStyle(chart).getPropertyValue('--plot-height'));
@@ -97,7 +97,7 @@
     // 窄图只保留首尾时间，避免三组时间标签相互挤压。
     const ticks = first === last ? [first] : width < 400 ? [first, last] : [first, first + (last - first) / 2, last];
     for (const at of ticks) svg += '<text class="market-chart-label" x="' + x(at) + '" y="' + (height - 14) + '" text-anchor="' + (at === first && first !== last ? 'start' : at === last && first !== last ? 'end' : 'middle') + '">' + timeFormat.format(at) + '</text>';
-    return svg + '</svg><p class="market-chart-note">本次运行 · ' + history.filter(point => point.complete).length + ' 次采样</p>';
+    return svg + '</svg><p class="market-chart-note">' + history.filter(point => point.complete).length + ' 次采样</p>';
   }
 
   function render() {
@@ -136,20 +136,21 @@
     set('market-host-count', hosts ? rows.length + ' / ' + hosts.rows.length + ' 台' : '尚未读取');
     set('market-host-status', !ready() ? '连接 AutoDL 后查看主机' : pending === 'hosts' ? (!hostRegion ? '正在读取 ' + hostModel + ' 的各地区主机…' : '正在读取 ' + scope + ' 的主机…')
       : hostError ? '读取失败：' + hostError + (hosts ? '；显示 ' + dateFormat.format(hosts.checkedAt) + ' 的结果' : '')
-      : !selected ? '选择型号或地区查看主机'
+      : !selected ? '请选择型号或地区'
       : hosts ? (hosts.complete ? '' : '列表尚未完整：' + (hosts.note || hosts.error || '仍有未读取主机') + ' · ') + '同步于 ' + dateFormat.format(hosts.checkedAt) + '（北京时间）'
       : '点击刷新查看主机');
     if (!hosts || !rows.length) {
-      html('market-host-list', empty(!hosts ? pending === 'hosts' ? '正在读取主机…' : selected ? '尚未读取当前筛选结果' : '尚未选择筛选条件' : onlyAvailable ? '已读结果中暂无空闲主机' : '当前筛选暂无主机'));
+      html('market-host-list', empty(!hosts ? pending === 'hosts' ? '正在读取主机…' : selected ? '暂无筛选结果' : '请选择型号或地区' : onlyAvailable ? '当前结果暂无空闲主机' : '当前筛选暂无主机'));
       return;
     }
-    html('market-host-list', '<table class="market-host-table"><caption>' + esc(scope) + '</caption><thead><tr>'
+    // 筛选控件已表达当前范围，表格名称留给读屏，不再重复占用一行。
+    html('market-host-list', '<table class="market-host-table"><caption class="visually-hidden">' + esc(scope) + '</caption><thead><tr>'
       + ['主机 / 型号', '地区', '空闲 / 总数', '单卡小时价', '状态', '操作'].map(label => '<th scope="col">' + label + '</th>').join('') + '</tr></thead><tbody>'
       + rows.map(row => '<tr><td class="host-main"><strong>' + esc(row.hostNumber || row.hostId) + '</strong><span class="host-meta">' + esc(row.model) + '</span></td>'
         + '<td>' + esc(row.region) + '</td><td class="host-availability"><strong' + (row.available > 0 ? ' class="has-stock"' : '') + '>' + numeric(row.available) + '</strong><span class="host-total"> / ' + numeric(row.total) + '</span></td>'
         + '<td class="host-price">' + (Number.isFinite(row.pricePerHour) ? '¥' + row.pricePerHour.toLocaleString('zh-CN', { maximumFractionDigits: 3 }) + '/时' : '—')
-        + (row.priceNote ? '<span class="host-meta">' + esc(row.priceNote) + '</span>' : '') + '</td><td class="host-status">' + esc(row.status) + '</td>'
-        + '<td><button type="button" class="button small" data-market-use-model="' + esc(row.model) + '" data-market-use-region="' + esc(row.region) + '">用于抢卡</button></td></tr>').join('') + '</tbody></table>');
+        + (row.priceNote ? '<button type="button" class="info-button" aria-label="价格说明" data-help="' + esc(row.priceNote) + '"><span aria-hidden="true">i</span></button>' : '') + '</td><td class="host-status">' + esc(row.status) + '</td>'
+        + '<td><button type="button" class="button small" data-market-use-model="' + esc(row.model) + '" data-market-use-region="' + esc(row.region) + '">填入抢卡配置</button></td></tr>').join('') + '</tbody></table>');
   }
   function renderTracking() {
     const tracking = element('market-auto').checked;

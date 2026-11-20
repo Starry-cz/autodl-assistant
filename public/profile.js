@@ -11,10 +11,11 @@
     $('#account-status').textContent=syncing?'正在同步':ready?(session?.background?'后台已连接':'账号已连接'):session?.browserOpen?'等待登录':'账号与设置';
     $('#account-avatar').textContent=identity?.displayName?.slice(0,1).toUpperCase() || 'AD';
     $('#profile .profile-avatar').textContent=$('#account-avatar').textContent;
-    $('#profile-name').textContent=identity?.displayName || '连接你的 AutoDL 账号';
-    $('#profile-id').textContent=identity?'账号 ID：'+identity.accountId+(identity.subAccountId?' · 子账号 '+identity.subAccountId:''):'请连接 AutoDL 账号。';
+    $('#profile-name').textContent=identity?.displayName || '登录 AutoDL';
+    $('#profile-id').textContent=identity?'账号 ID：'+identity.accountId+(identity.subAccountId?' · 子账号 '+identity.subAccountId:''):'';
     $('#profile-status').textContent=ready?(identity?.kind==='sub'?'子账号已连接':'账号已连接'):appState.account?.error || '尚未连接';
-    $('#profile-sync-status').textContent=progress || (ready?'可同步实例、账单与库存。':'请在 AutoDL 窗口完成登录。');
+    // 已连接状态由身份区域表达；同步区保留进度、结果和未登录时的下一步。
+    $('#profile-sync-status').textContent=progress || (ready?'':'请在 AutoDL 窗口完成登录。');
     $('#profile-sync').disabled=!ready || syncing || !!appState.browser?.busy || !!browserAction;
     const unclaimed=appState.account?.unclaimedCount||0;
     $('#profile-legacy-note').hidden=!unclaimed;

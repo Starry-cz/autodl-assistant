@@ -41,12 +41,12 @@ function renderPlan(plan) {
   // 复用公共时间格式化函数显示快照时间，避免引用已不存在的相对时间函数中断整个结果渲染。
   const catalog = plan.catalogCheckedAt ? '目录更新于 ' + time(plan.catalogCheckedAt, true) : '请连接账号，在“抢卡控制台”同步 AutoDL 型号';
   const notices = (plan.notices || []).map(n => '<p class="notice">' + esc(n) + '</p>').join('');
-  panel.innerHTML = '<h2>规划结果 · 待你确认</h2>' + notices + model +
+  panel.innerHTML = '<h2>规划结果</h2>' + notices + model +
     '<div class="ai-result-section"><h3>读出的条件</h3>' + planConstraints(plan.constraints) + '</div>' +
     '<div class="ai-result-section"><h3>候选型号</h3><p class="hint">' + esc(catalog) + '。多个任务成功后分别计费。</p>' +
-    (usable.length ? '<table class="plan-table"><thead><tr><th>型号</th><th>结论</th><th>各地区空闲/总数</th><th>原因</th><th></th></tr></thead><tbody>' + planGpuRows(usable, true) + '</tbody></table>' : '<p class="notice">目录中没有满足条件的型号。</p>') +
+    (usable.length ? '<table class="plan-table"><thead><tr><th scope="col">型号</th><th scope="col">状态</th><th scope="col">地区 · 空闲/总数</th><th scope="col">筛选依据</th><th scope="col">操作</th></tr></thead><tbody>' + planGpuRows(usable, true) + '</tbody></table>' : '<p class="notice">目录中没有满足条件的型号。</p>') +
     (excluded.length ? '<details><summary>不满足条件的型号（' + esc(excluded.length) + '）</summary><table class="plan-table"><tbody>' + planGpuRows(excluded, false) + '</tbody></table></details>' : '') + '</div>' +
-    '<div class="ai-result-section"><h3>实例检查命令</h3><p class="hint">在实例终端运行，核对 GPU、驱动和 PyTorch。</p><pre class="plan-commands">' +
+    '<div class="ai-result-section"><h3>实例检查命令 <button type="button" class="info-button" aria-label="实例检查命令的运行位置" data-help="在 AutoDL 实例终端运行，核对 GPU、驱动和 PyTorch。"><span aria-hidden="true">i</span></button></h3><pre class="plan-commands">' +
     plan.setupCommands.map(esc).join('\n') + '</pre></div>' +
     '<p class="notice">填入任务后，请核对配置和费用再提交。</p>';
 }

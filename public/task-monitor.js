@@ -45,7 +45,7 @@
   }
 
   function chart(task, samples) {
-    if (!samples.length) return '<p class="task-monitor-empty">开始检查后显示采样。</p>';
+    if (!samples.length) return '<p class="task-monitor-empty">暂无采样</p>';
     const boot = task.config.mode === 'boot', points = samples.map(sample => pointValue(sample, boot));
     const width = 640, height = 196, left = 56, right = 18, top = 24, bottom = 46;
     const maximum = boot ? 1 : Math.max(1, ...points.filter(Boolean).map(point => point.value));
@@ -75,9 +75,11 @@
 
   function history(task) {
     const samples = samplesOf(task), boot = task.config.mode === 'boot';
-    return '<details class="task-monitor-history" data-monitor-history="' + esc(task.id) + '"><summary><span>最近 60 次采样</span><small>' + (samples.length ? '已记录 ' + samples.length + ' 次' : '未采样') + '</small></summary>'
-      + '<div class="task-monitor-history-body">' + summary(task) + chart(task, samples)
-      + '<p class="task-sample-note">' + (boot ? '纵轴：GPU 是否充足。' : '实心：完整读数；空心：部分读数。') + '悬停或聚焦采样点查看详情。</p></div></details>';
+    // 常驻区域只保留趋势和读数；采样口径放入可聚焦的信息提示。
+    return '<details class="task-monitor-history" data-monitor-history="' + esc(task.id) + '"><summary><span>库存趋势</span><small>' + (samples.length ? samples.length + ' 次采样' : '未采样') + '</small></summary>'
+      + '<div class="task-monitor-history-body"><div class="task-monitor-history-heading">' + summary(task)
+      + '<button type="button" class="info-button" aria-label="采样范围说明" data-help="最近 60 次采样。' + (boot ? '纵轴表示原实例 GPU 是否充足。' : '实心点为完整读数，空心点为部分读数；未知或失败处不连线。') + '"><span aria-hidden="true">i</span></button></div>'
+      + chart(task, samples) + '</div></details>';
   }
 
   function tick() {
