@@ -106,8 +106,8 @@ try {
   await form.locator('[name=region][value="西北B区"]').check();
   assert.deepEqual(await optionValues(), [...beijing, 'RTX 3090']);
   assert.equal(await optionText('RTX 4090'), 'RTX 4090（北京B区 2/8，西北B区 0/16）');
-  // 多地区合集已在上方核验；常态提示仅需明确库存是同步快照，不绑定冗长教程文案。
-  assert.match(await page.locator('#gpu-model-hint').textContent(), /同步于.*空闲 \/ 总数快照/);
+  // 多地区合集已在上方核验；提示需同时指出同步时间和空闲 / 总数的含义。
+  assert.match(await page.locator('#gpu-model-hint').textContent(), /同步于.*空闲 \/ 总数/);
   await form.locator('[name=region][value="西北B区"]').uncheck();
   assert.deepEqual(await optionValues(), beijing);
 
@@ -236,9 +236,9 @@ try {
   await page.locator('#sync-gpus').click();
   await page.waitForFunction(() => !document.querySelector('#sync-gpus').disabled);
   assert.equal(catalogSyncs, 1);
-  await page.waitForFunction(() => !document.querySelector('#sync-gpus').disabled && /^同步于 .*快照/.test(document.querySelector('#gpu-model-hint').textContent));
+  await page.waitForFunction(() => !document.querySelector('#sync-gpus').disabled && /^同步于 .*空闲 \/ 总数/.test(document.querySelector('#gpu-model-hint').textContent));
   await page.waitForTimeout(4600); assert.equal(catalogSyncs, 1);
-  assert.match(await page.locator('#gpu-model-hint').textContent(), /空闲 \/ 总数快照/);
+  assert.match(await page.locator('#gpu-model-hint').textContent(), /空闲 \/ 总数/);
   // 真实浏览器中的本地 DOM 夹具：不用真实 AutoDL 页面或会话。
   fixtures.set('/synthetic-host-dom', '<!doctype html><meta charset="utf-8"><body>' +
     '<label class="el-checkbox"><input type="checkbox" checked>全部</label>' +
