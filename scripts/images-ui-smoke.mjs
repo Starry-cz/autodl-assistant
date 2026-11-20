@@ -101,7 +101,7 @@ try {
   await page.locator('[data-mode=clone]').click();assert.equal(await field('cuda').inputValue(),'');await page.locator('[data-mode=create]').click();
   for(const mode of ['failure','missing','empty','disabled','duplicate']){
     responseMode=mode;await page.locator('#sync-images').click();
-    const expected=mode==='failure'?'同步失败':mode==='missing'?'旧版代码':mode==='duplicate'?'重名选项':'暂无可用';
+    const expected=mode==='failure'?'合成菜单暂时无法读取':mode==='missing'?'后台版本不匹配，请正常退出并重新启动助手':mode==='duplicate'?'重名选项':'暂无可用';
     await page.waitForFunction(text=>document.querySelector('#image-status').textContent.includes(text),expected);
     assert.equal(await field('imagePath').inputValue(),'');assert.equal(await field('cuda').inputValue(),'');assert.equal(await page.locator(ids[0]).isDisabled(),true);
   }

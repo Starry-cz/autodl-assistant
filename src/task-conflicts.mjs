@@ -2,10 +2,14 @@ import { AppError } from './errors.mjs';
 import { gpuKey } from './matching.mjs';
 const FINISHED = new Set(['cancelled', 'expired', 'completed', 'found']);
 export function sameTaskResource(task, config) {
-  return task.config.provider === 'autodl' && config.provider === 'autodl'
-    && task.config.mode === config.mode
-    && (['clone', 'boot'].includes(config.mode) ? task.config.sourceId === config.sourceId
-      : gpuKey(task.config.gpuModel) === gpuKey(config.gpuModel));
+  const existing = task.config;
+  if (existing.provider !== 'autodl' || config.provider !== 'autodl') return false;
+  if (['clone', 'boot'].includes(config.mode)) {
+    // 组合任务持有原机和克隆两个入口；停下但仍有未决提交时也不能另开一路。
+    return ['clone', 'boot'].includes(existing.mode) && existing.sourceId === config.sourceId
+      && (existing.mode === config.mode || existing.raceBoot === true || config.raceBoot === true);
+  }
+  return existing.mode === config.mode && gpuKey(existing.gpuModel) === gpuKey(config.gpuModel);
 }
 export function blocksTask(task, config) {
   // 未核验完成的提交记录即使被停止也保留去重保护。
@@ -13,7 +17,11 @@ export function blocksTask(task, config) {
     && (!FINISHED.has(task.state) || (!!task.operation && task.state !== 'completed'));
 }
 export function canReplaceTask(task) {
-  return ['attention', 'paused'].includes(task.state) && !task.operation && !task.result && !task.replacedBy;
+  // 原机任务会把库存检查时看到的已关机实例写入 result；这条观察记录不是开机回执。
+  const source = task.result;
+  const stoppedBootSource = task.config.mode === 'boot' && source?.id === task.config.sourceId
+    && source?.stopped === true && !source.starting && !source.running;
+  return ['attention', 'paused'].includes(task.state) && !task.operation && !task.replacedBy && (!source || stoppedBootSource);
 }
 export function conflictError(task) {
   const conflict = {

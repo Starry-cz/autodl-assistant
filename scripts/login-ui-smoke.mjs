@@ -70,7 +70,7 @@ try {
   await page.locator('[data-action-choice=observe]').click();
 
   await page.locator('#submit-task').click();
-  await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('请先登录 AutoDL'));
+  await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('请先连接 AutoDL 账号'));
   assert.equal(app.store.tasks().length, 0);
   assert.equal(await page.evaluate(() => document.activeElement.id), 'open-browser');
   await page.locator('#open-browser').click();
@@ -120,7 +120,7 @@ try {
   await checkState('expired', '登录已失效');
   await goView(page, 'dashboard');
   await page.locator('#submit-task').click();
-  await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('请先登录 AutoDL'));
+  await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('请先连接 AutoDL 账号'));
   assert.equal(app.store.tasks().length, 1);
   await checkState('ready', '会话可用');
 

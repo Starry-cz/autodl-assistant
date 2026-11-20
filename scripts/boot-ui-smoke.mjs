@@ -108,6 +108,110 @@ try {
   await page.locator('[data-mode=boot]').click();
   assert.equal(await page.locator('#clone-options').isVisible(), false);
 
+  // 组合策略的两个入口共用一张表单。仅释放合成旧任务，使用真实本机接口校验并建立后续任务。
+  app.store.patch(task, {state:'completed'});
+  await field('sourceId').selectOption('synthetic-source');
+  await field('paidConsent').check();
+  await page.locator('#boot-or-clone').click();
+  assert.equal(await page.locator('[data-mode=clone]').getAttribute('aria-selected'), 'true');
+  assert.equal(await field('raceBoot').isChecked(), true);
+  assert.equal(await field('paidConsent').isChecked(), false);
+  assert.equal(await field('sourceId').inputValue(), rows[0].id);
+  assert.equal(await field('gpuModel').isDisabled(), true);
+  assert.equal(await field('gpuCount').isDisabled(), true);
+  assert.equal(await field('balanceGuard').isDisabled(), true);
+  assert.match(await page.locator('#consent-text').textContent(), /只执行一项.*原实例.*报价.*克隆.*原实例保留/);
+  await field('paidConsent').check();
+  await field('copyDataDisk').uncheck();
+  assert.equal(await field('paidConsent').isChecked(), false);
+  await field('raceBoot').uncheck();
+  assert.equal(await field('gpuCount').isEnabled(), true);
+  await page.locator('#balance-options summary').click();
+  await field('balanceGuard').check();
+  assert.equal(await field('raceBoot').isDisabled(), true);
+  assert.match(await page.locator('#race-help').textContent(), /取消余额保护/);
+  await page.locator('[data-mode=boot]').click();
+  await page.locator('#boot-or-clone').click();
+  assert.equal(await field('raceBoot').isChecked(), false);
+  assert.equal(await field('balanceGuard').isChecked(), true);
+  await field('balanceGuard').uncheck();
+  await field('gpuCount').selectOption('2');
+  await field('raceBoot').check();
+  assert.equal(await field('gpuCount').inputValue(), String(rows[0].gpuCount));
+  await page.locator('[data-action-choice=observe]').click();
+  assert.equal(await page.locator('#consent-label').isVisible(), false);
+  assert.equal(await page.locator('#balance-fields').isVisible(), false);
+  let combo;
+  const previousPosts = posts.length;
+  for (const action of ['observe','execute']) {
+    if (action==='execute') {
+      await page.locator('[data-action-choice=execute]').click();
+      await field('paidConsent').check();
+    }
+    const response = page.waitForResponse(r => new URL(r.url()).pathname==='/api/tasks' && r.request().method()==='POST');
+    await page.locator('#submit-task').click();
+    const result = await response;
+    assert.ok(result.ok(), await result.text());
+    const payload = posts.at(-1);
+    assert.equal(payload.mode, 'clone');
+    assert.equal(payload.raceBoot, true);
+    assert.equal(payload.action, action);
+    assert.equal(payload.paidConsent, action==='execute');
+    assert.equal(payload.balanceGuard, false);
+    assert.equal(payload.pricePolicy, 'official');
+    assert.equal(payload.copyDataDisk, false);
+    assert.equal(payload.sourceId, rows[0].id);
+    assert.equal(payload.gpuModel, rows[0].gpuModel);
+    assert.equal(Number(payload.gpuCount), rows[0].gpuCount);
+    assert.deepEqual(payload.regions, [rows[0].region]);
+    combo = app.store.tasks()[0];
+    assert.equal(combo.config.raceBoot, true);
+    assert.equal(combo.config.action, action);
+    assert.equal(combo.config.gpuCount, rows[0].gpuCount);
+    assert.equal(combo.config.balanceGuard, false);
+    assert.equal(combo.operation, null);
+    if (action==='observe') app.store.patch(combo, {state:'found',raceWinner:'boot'});
+  }
+  assert.equal(posts.length - previousPosts, 2);
+  const details = page.locator('[data-detail="' + combo.id + '"]');
+  // 原机胜出后，详情必须指向原机核对，不能提供克隆专用的绑定和数据盘确认。
+  const comboConfig = {...combo.config, copyDataDisk:true};
+  const at = Date.now();
+  const monitor = {...combo.monitor, samples:[
+    {at:at-1000,kind:'market',scope:'full',status:'ok',complete:true,available:5,total:12},
+    {at,kind:'boot',scope:'target',status:'ok',complete:true,gpuAvailable:true}
+  ]};
+  for (const kind of ['boot','clone']) {
+    app.store.patch(combo, {config:comboConfig, state:'attention', raceWinner:kind, operation:{...operation,kind}, monitor});
+    await page.evaluate(() => refresh());
+    await details.click();
+    assert.match(await page.locator('#detail-state').textContent(), kind==='boot'?/组合 · 原实例开机/:/组合 · 同区克隆/);
+    assert.equal(await page.locator('#attach-form').isVisible(), kind==='clone');
+    assert.equal(await page.locator('#data-confirmed').isVisible(), kind==='clone');
+    assert.match(await page.locator('.task-monitor-history summary').innerText(), /同区克隆库存趋势.*1 次采样/s);
+    await page.locator('.task-monitor-history summary').click();
+    assert.match(await page.locator('.task-monitor-history-body').innerText(), /原实例 GPU 充足.*同区库存 空闲 5 \/ 12 张/s);
+    assert.equal(await page.locator('.task-sample-chart circle').count(), 1);
+    await page.locator('#close-dialog').click();
+  }
+  // 即使独立的只读复核未找到新增实例，组合任务也不得暗示可以清除记录重试。
+  app.store.patch(combo, {config:comboConfig, state:'attention', raceWinner:'clone', operation:{...operation,kind:'clone',stage:'click_started',receipt:null}});
+  await page.evaluate(() => refresh());
+  await details.click();
+  const recheck = page.locator('[data-command=recheck]');
+  assert.match(await recheck.locator('..').innerText(), /保留本次克隆记录/);
+  await page.route('**/api/tasks/*/recheck', route=>route.fulfill({json:{result:{cleared:false,extra:[]}}}));
+  page.once('dialog', async dialog => {
+    assert.match(dialog.message(), /克隆记录将保留/);
+    await dialog.accept();
+  });
+  await recheck.click();
+  await page.waitForFunction(()=>document.querySelector('#toast').textContent.includes('尚未查到新增实例'));
+  assert.match(await page.locator('#toast').textContent(), /提交记录已保留/);
+  await page.locator('#close-dialog').click();
+  await page.locator('[data-mode=boot]').click();
+  assert.equal(await field('raceBoot').isChecked(), false);
+
   // 用真实 Chromium DOM 验证官方开机确认框定位，仍只操作离线合成页面。
   const platformPage = await context.newPage();
   let marked = false, confirmed = false;

@@ -17,6 +17,8 @@ export function validateCloneSource(config, source) {
   if (source.id !== config.sourceId || source.region !== config.regions[0] || config.regions.length !== 1)
     fail('SOURCE_MISMATCH', '源实例在 ' + source.region + '，任务地区为 ' + config.regions.join('、')
       + '；克隆只能在源实例所在地区进行，请重新同步并选择源实例', { status: 409 });
+  // 组合任务的两种操作共享同一规格。每次克隆侧复核也重新核对原机规格。
+  if (config.raceBoot) validateBootSource(config, source);
   return source;
 }
 export function publicInstance(source) {

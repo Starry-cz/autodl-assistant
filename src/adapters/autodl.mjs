@@ -481,6 +481,13 @@ export class AutoDLBrowserAdapter {
       page_index: pageIndex, page_size: pageSize, bill_type: '' });
   }
   async inspectBoot(t) {
+    // 组合任务改走原机前也检查先前明确拒绝后的迟到克隆，不能绕开克隆准备阶段原有的延迟创建保护。
+    if (t.config.raceBoot && (t.submitRejections || []).some(record => Date.now() - record.at < 30 * 60000)) {
+      const rows = await this.instances(t.config.gpuModel);
+      this.lateCreation(t, rows);
+      const info = rows.find(row => hasId(row, t.config.sourceId));
+      return validateBootSource(t.config, info && { ...info, id: t.config.sourceId });
+    }
     const { info } = await this.findInstanceRow(t.config.sourceId, t.config.gpuModel);
     return validateBootSource(t.config, info);
   }
@@ -489,7 +496,9 @@ export class AutoDLBrowserAdapter {
   async boot(t, mark) {
     const { row, info } = await this.findInstanceRow(t.config.sourceId, t.config.gpuModel);
     validateBootSource(t.config, info);
-    if (!info.stopped || info.gpuAvailable === false) return { notSubmitted: true, message: '原实例状态或库存已变化，未点击开机' };
+    // 二次核验变成未知也不能替组合任务占用付费执行权；下一轮可继续检查同区克隆。
+    if (!info.stopped || info.gpuAvailable === false || t.config.raceBoot && info.gpuAvailable !== true)
+      return { notSubmitted: true, message: '原实例状态或库存已变化，未点击开机' };
     const start = row.getByRole('button', { name: '开机', exact: true });
     if (await start.count() !== 1 || !await start.isEnabled()) fail('BOOT_BUTTON', '原实例的开机按钮不可用，请在 AutoDL 核对');
     await this.markClickSignals();

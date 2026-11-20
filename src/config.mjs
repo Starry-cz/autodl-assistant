@@ -23,13 +23,19 @@ function num(value, fallback, min, max, label, integer = false) {
   return n;
 }
 export function normalizeConfig(input = {}) {
-  for (const key of ['copyDataDisk','balanceGuard','includeVouchers']) {
+  for (const key of ['copyDataDisk','balanceGuard','includeVouchers','raceBoot']) {
     if (input[key] !== undefined && typeof input[key] !== 'boolean') fail('CONFIG', `${key} 必须为布尔值`);
   }
   const provider = input.provider ?? 'autodl';
   if (provider !== 'autodl') fail('CONFIG', '仅支持真实 AutoDL；旧版演练任务已停用');
   const mode = input.mode ?? 'create';
   if (!['create', 'clone', 'boot'].includes(mode)) fail('CONFIG', '任务模式无效');
+  const raceBoot = input.raceBoot === true;
+  // 原实例开机沿用原计费方式，无法在点击前核验新租报价或预算。
+  if (raceBoot && mode !== 'clone') fail('CONFIG', '组合抢卡需要选择迁移克隆和已关机的源实例');
+  if (raceBoot && (input.balanceGuard || input.pricePolicy !== 'official'
+    || ['maxGpuHourly','maxTotalHourly','maxStorageDaily'].some(key => input[key] != null && input[key] !== '')))
+    fail('CONFIG', '组合抢卡需使用平台报价且关闭余额保护；如需预算限制，请单独建立克隆任务');
   const action = input.action ?? 'observe';
   if (!['observe', 'execute'].includes(action)) fail('CONFIG', '执行方式无效');
   if (action === 'execute' && input.paidConsent !== true) fail('CONSENT', '自动创建或开机会产生 AutoDL 费用，请在表单中明确启用');
@@ -76,8 +82,9 @@ export function normalizeConfig(input = {}) {
   const scanScope = input.scanScope ?? 'full';
   if (!SCAN_SCOPES.includes(scanScope)) fail('CONFIG', '扫描方式无效');
   return {
-    name: text(input.name || `${mode === 'clone' ? '迁移克隆' : '新建实例'} · ${gpuModel}`, 80),
+    name: text(input.name || `${raceBoot ? '原机或同区克隆' : mode === 'clone' ? '迁移克隆' : '新建实例'} · ${gpuModel}`, 80),
     provider, mode, action, paidConsent: action === 'execute', gpuModel, gpuCount, regions, cuda,
+    ...(raceBoot ? { raceBoot: true } : {}),
     sourceId: mode === 'clone' ? sourceId : '',
     imagePath: mode === 'create' ? imagePath : [],
     copyDataDisk: mode === 'clone' && input.copyDataDisk !== false,

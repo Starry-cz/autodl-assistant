@@ -6,11 +6,15 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, c=>({'&':'&amp;','<
 const time = (n, full=false) => n ? new Date(n).toLocaleString('zh-CN', full ? {hour12:false} : {hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}) : '—';
 const STATES = {queued:'等待首次检查',watching:'监测库存',preparing:'核对配置',submitting:'提交中',verifying:'验证实例与数据',reconciling:'等待绑定核对',paused:'已暂停',found:'已找到资源',completed:'已完成',attention:'需要处理',expired:'监测已到期',cancelled:'已停止'};
 const modeLabel = mode => ({create:'新建实例',boot:'原实例开机',clone:'迁移克隆'}[mode] || mode);
+// 一条组合任务可以命中任一分支；收据及后续核验只跟随已选中的操作。
+const raceEnabled = () => currentMode === 'clone' && $('#task-form').elements.raceBoot.checked;
+const winningBranch = t => t.config.raceBoot ? (t.operation?.kind || t.raceWinner || '') : t.config.mode;
+const taskModeLabel = t => t.config.raceBoot ? (winningBranch(t) === 'boot' ? '组合 · 原实例开机' : winningBranch(t) === 'clone' ? '组合 · 同区克隆' : '原实例开机或同区克隆') : modeLabel(t.config.mode);
 const scanLabel = c => c.mode==='boot'?'检查原实例状态':c.scanScope==='first-page'?`首页优先，约每 ${c.fullScanSeconds}s 完整翻页`:'每轮完整翻页';
 const ACTIVE = ['queued','watching','preparing','submitting','verifying'];
 // 已停止但请求已发送的原实例任务，只允许继续核对同一实例的结果。
-const canReconcileBoot = t => t.config.mode==='boot'&&t.state==='cancelled'&&t.operation?.receipt?.instanceId===t.config.sourceId;
-const canResumeTask = t => canReconcileBoot(t)||(['paused','attention','found','expired'].includes(t.state)&&(t.config.mode==='boot'||!t.operation||t.operation.receipt));
+const canReconcileBoot = t => winningBranch(t)==='boot'&&t.state==='cancelled'&&t.operation?.receipt?.instanceId===t.config.sourceId;
+const canResumeTask = t => canReconcileBoot(t)||(['paused','attention','found','expired'].includes(t.state)&&(winningBranch(t)==='boot'||!t.operation||t.operation.receipt));
 let appState = {tasks:[],notifications:[],settings:{}}, currentMode='create', detailId=null, initialSettings=false, seenNotifications=null, toastTimer=null, fetching=false, browserAction=null, modelCatalogSignature=null;
 const CUSTOM_GPU_MODEL = '__custom__';
 let pendingConflict = null, conflictBusy = false;
@@ -45,14 +49,14 @@ function updateGpuSelection(){
   // 克隆：型号和数量默认取源实例的规格，可以更换；源实例本身只读取。
   const source=currentMode==='clone'?window.pickedSource?.():null;
   const same=!!source&&gpuIdentity(model)===gpuIdentity(source.gpuModel)&&form.elements.gpuCount.value===String(source.gpuCount);
-  $('#gpu-model-title').textContent=currentMode!=='clone'?'GPU 精确型号':source?'目标 GPU 型号（可更换）':'目标 GPU 型号';
+  $('#gpu-model-title').textContent=currentMode!=='clone'?'GPU 精确型号':source?(raceEnabled()?'原实例 GPU 型号':'目标 GPU 型号（可更换）'):'目标 GPU 型号';
   $('#metric-gpu-model').textContent=model || '尚未选择';
   $('#metric-gpu-model').classList.toggle('long-model',model.length>22);
-  $('#metric-gpu-detail').textContent=model ? form.elements.gpuCount.value+' 张 · '+(currentMode==='boot'?'原实例开机':currentMode!=='clone'?'新建实例':!source||same?'同源型号克隆':'克隆到其他型号') : '';
+  $('#metric-gpu-detail').textContent=model ? form.elements.gpuCount.value+' 张 · '+(currentMode==='boot'?'原实例开机':currentMode!=='clone'?'新建实例':raceEnabled()?'开机或同区克隆':!source||same?'同源型号克隆':'克隆到其他型号') : '';
   renderGpuCatalogStatus();
 }
 // 任务的环境 CUDA：新建取所选镜像；克隆取首次检查时从源实例读到的 CUDA。
-const taskCuda=t=>t.config.mode==='boot'?'保留原环境':t.config.mode==='clone'?(t.source?.sourceCuda?'CUDA '+t.source.sourceCuda+'（源实例）':'CUDA 跟随源实例'):'CUDA '+t.config.cuda;
+const taskCuda=t=>winningBranch(t)==='boot'?'保留原环境':t.config.mode==='clone'?(t.source?.sourceCuda?'CUDA '+t.source.sourceCuda+'（源实例）':'CUDA 跟随源实例'):'CUDA '+t.config.cuda;
 // 型号目录来自 AutoDL 创建页的“GPU 型号”筛选（按地区同步，括号内为同步时的空闲/总数）；只列所选地区有的型号。
 const checkedRegions=()=>$$('input[name=region]:checked').map(n=>n.value);
 const gpuIdentity=value=>String(value||'').toUpperCase().replace(/[\s_-]/g,'');
@@ -147,12 +151,16 @@ function updateForm(){
   $('#create-fields').classList.toggle('hidden',currentMode!=='create');
   $('#clone-fields').classList.toggle('hidden',currentMode==='create');
   $('#clone-options').classList.toggle('hidden',currentMode!=='clone');
+  $('#boot-or-clone').hidden=!boot;
+  const race = raceEnabled();
+  $('#pricing-heading').textContent = race ? '克隆费用预览' : '费用预览';
   $('.flow-card').classList.toggle('hidden',currentMode!=='clone');
   $('#source-label').textContent=boot?'选择要开机的原实例':'选择源实例';
   // 开机沿用原实例配置，隐藏并禁用只属于新租/克隆的控件，避免必填项挡住提交。
   for(const id of ['resource-fields','pricing-fields','balance-fields','scan-fields']) {
-    const block=$('#'+id);block.classList.toggle('hidden',boot);
-    for(const input of $$('input,select,button',block))input.disabled=boot;
+    const block=$('#'+id), unavailable=boot||(race && id==='balance-fields');
+    block.classList.toggle('hidden',unavailable);
+    for(const input of $$('input,select,button',block))input.disabled=unavailable;
   }
   form.elements.gpuModel.required=!boot;
   form.elements.action.options[0].textContent=boot?'自动为原实例有卡开机':currentMode==='clone'?'自动克隆并开机':'自动创建并开机';
@@ -161,10 +169,10 @@ function updateForm(){
     const selected=choice.dataset.actionChoice===form.elements.action.value;
     choice.classList.toggle('selected',selected);choice.setAttribute('aria-pressed',String(selected));
   }
-  $('#action-execute-title').textContent=boot?'自动开机':currentMode==='clone'?'自动克隆并开机':'自动新租';
-  $('#action-execute-description').textContent=boot?'原主机有卡后开机':currentMode==='clone'?'克隆环境并开机':'创建实例并开机';
-  $('#action-notify-description').textContent=boot?'有卡时通知，不开机':'有卡时通知，不创建实例';
-  $('#consent-text').textContent=boot?'我授权为选中的原实例自动有卡开机，沿用原计费方式并产生费用。运行后需在 AutoDL 自行关机。':'我授权按提交时 AutoDL 报价自动创建或克隆并开机，费用由本人承担。预览不锁价，运行后需自行关机。';
+  $('#action-execute-title').textContent=race?'自动抢一台':boot?'自动开机':currentMode==='clone'?'自动克隆并开机':'自动新租';
+  $('#action-execute-description').textContent=race?'同一轮都有卡时，优先开原实例':boot?'原主机有卡后开机':currentMode==='clone'?'克隆环境并开机':'创建实例并开机';
+  $('#action-notify-description').textContent=race?'任一处有卡时通知，不开机或克隆':boot?'有卡时通知，不开机':'有卡时通知，不创建实例';
+  $('#consent-text').textContent=race?'我同意只执行一项：原实例开机并沿原方式计费，或按提交时报价新建同区克隆并开机。克隆后原实例保留，运行费用自理，需自行关机。':boot?'我授权为选中的原实例自动有卡开机，沿用原计费方式并产生费用。运行后需在 AutoDL 自行关机。':'我授权按提交时 AutoDL 报价自动创建或克隆并开机，费用由本人承担。预览不锁价，运行后需自行关机。';
   $('#submit-task').innerHTML=(boot?(execute?'开始监测并开机':'监测原实例 GPU'):(execute?'开始抢卡':'开始库存监测'))+' <span>→</span>';
   $('#task-footnote').textContent=boot?'暂停监测不会关闭云端实例。':'';
   form.elements.fullScanSeconds.disabled=boot||form.elements.scanScope.value!=='first-page';
@@ -230,8 +238,8 @@ function renderTasks(){
   $('#metric-attention').textContent=tasks.filter(t=>['attention','reconciling'].includes(t.state)).length;
   $('#task-count').textContent=tasks.length;
   const html=tasks.length?tasks.map(t=>{
-    const c=t.config,progress=t.state==='completed'?(c.mode==='clone'?(c.copyDataDisk!==false?'数据盘复制完成，目标 GPU 实例已运行':'系统盘克隆完成，目标 GPU 实例已运行（未复制数据盘）'):c.mode==='boot'?'原实例已确认有卡运行':'目标 GPU 实例已运行'):(t.lastError || t.balanceLow?.message || t.lastProgress || t.lastScan?.summary || '等待资源检查');
-    return `<article class="task-card" data-task-id="${esc(t.id)}"><div class="task-top"><h3 title="${esc(c.name)}">${esc(c.name)}</h3>${badge(t.state,c.mode)}</div><div class="task-meta"><span>${modeLabel(c.mode)}</span><span>${esc(c.gpuModel)} × ${c.gpuCount}</span><span>${esc(c.regions.join(' / '))}</span><span>${esc(taskCuda(t))}</span></div><div class="task-progress${t.lastError||t.balanceLow?' error':''}">${esc(progress)}</div>${window.taskMonitor.summary(t)}<div class="task-bottom"><small>检查 ${t.attempts} 次 · ${c.pollSeconds}s 间隔 · ${esc(scanLabel(c))}<br>${t.result?.id?`实例 ${esc(t.result.id)}`:`更新于 ${time(t.updatedAt)}`}</small><div class="task-buttons">${ACTIVE.includes(t.state)?`<button class="text-button" data-command="pause" data-id="${t.id}">暂停</button>`:''}${canResumeTask(t)?`<button class="text-button" data-command="resume" data-id="${t.id}">${canReconcileBoot(t)?'继续核对原实例':'恢复'}</button>`:''}<button class="text-button" data-detail="${t.id}" aria-haspopup="dialog" aria-controls="task-dialog">详情与日志</button></div></div></article>`;
+    const c=t.config,branch=winningBranch(t),progress=t.state==='completed'?(branch==='clone'?(c.copyDataDisk!==false?'数据盘复制完成，目标 GPU 实例已运行':'系统盘克隆完成，目标 GPU 实例已运行（未复制数据盘）'):branch==='boot'?'原实例已确认有卡运行':'目标 GPU 实例已运行'):(t.lastError || t.balanceLow?.message || t.lastProgress || t.lastScan?.summary || '等待资源检查');
+    return `<article class="task-card" data-task-id="${esc(t.id)}"><div class="task-top"><h3 title="${esc(c.name)}">${esc(c.name)}</h3>${badge(t.state,winningBranch(t))}</div><div class="task-meta"><span>${taskModeLabel(t)}</span><span>${esc(c.gpuModel)} × ${c.gpuCount}</span><span>${esc(c.regions.join(' / '))}</span><span>${esc(taskCuda(t))}</span></div><div class="task-progress${t.lastError||t.balanceLow?' error':''}">${esc(progress)}</div>${window.taskMonitor.summary(t)}<div class="task-bottom"><small>检查 ${t.attempts} 次 · ${c.pollSeconds}s 间隔 · ${esc(scanLabel(c))}<br>${t.result?.id?`实例 ${esc(t.result.id)}`:`更新于 ${time(t.updatedAt)}`}</small><div class="task-buttons">${ACTIVE.includes(t.state)?`<button class="text-button" data-command="pause" data-id="${t.id}">暂停</button>`:''}${canResumeTask(t)?`<button class="text-button" data-command="resume" data-id="${t.id}">${canReconcileBoot(t)?'继续核对原实例':'恢复'}</button>`:''}<button class="text-button" data-detail="${t.id}" aria-haspopup="dialog" aria-controls="task-dialog">详情与日志</button></div></div></article>`;
   }).join(''):`<div class="empty"><div class="empty-icon">◫</div><h3>暂无任务</h3><p>配置任务后开始监测。</p></div>`;
   replaceKeeping($('#tasks'),html);
   window.taskMonitor.tick();
@@ -268,7 +276,8 @@ function renderDetail(){
   const t=appState.tasks.find(t=>t.id===detailId);if(!t)return;const c=t.config;
   if($('#task-dialog').contains(document.activeElement)&&['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))return;
   $('#detail-title').textContent=c.name;
-  const html=`<div id="detail-state">${badge(t.state,c.mode)} ${c.action==='execute'?'发现后自动提交':'仅监测通知'}</div><div class="detail-grid"><div><small>资源条件</small>${esc(c.gpuModel)} × ${c.gpuCount} / ${esc(taskCuda(t))}<br>${esc(c.regions.join('、'))}<br>${c.pollSeconds}s 检查间隔 · ${esc(scanLabel(c))}</div><div><small>${c.mode==='boot'?'原实例计费':c.pricePolicy==='official'?'平台报价':'单价边界'}</small>${c.mode==='boot'?'沿用原实例计费方式，价格请在 AutoDL 确认。':c.pricePolicy==='official'?(t.quote?`按平台报价：单卡 ¥${esc(t.quote.host?.price)}/时<br>配置 ¥${esc(t.quote.hourly)}/时，磁盘 ¥${esc(t.quote.storageDaily)}/日`:'按提交时的平台报价，等待完整报价'):`单卡 ≤ ¥${esc(c.maxGpuHourly)}/时<br>配置总价 ≤ ¥${esc(c.maxTotalHourly)}/时，磁盘 ≤ ¥${esc(c.maxStorageDaily)}/日`}</div><div><small>${c.mode==='boot'?'要开机的原实例':c.mode==='clone'?'源实例':'基础镜像'}</small>${esc(c.mode!=='create'?c.sourceId:c.imagePath.join(' / ')||'待核对')}${c.mode==='clone'?(t.source?'<br>源实例 '+esc(t.source.gpuModel||'型号未知')+' × '+esc(t.source.gpuCount??'?')+' · '+esc(t.source.sourceCuda?'CUDA '+t.source.sourceCuda:'CUDA 待读取')+'（只读）':'')+'<br>'+(c.copyDataDisk!==false?'含数据盘复制':'仅系统盘，未复制数据盘'):''}</div><div><small>提交状态</small>${t.operation?esc({intent:'操作意图已保存',click_started:'已进入点击，结果需核对',accepted:'已提交，继续核对实例'}[t.operation.stage]||t.operation.stage):'尚未提交'}<br>${t.operation?.receipt?.instanceId?esc(t.operation.receipt.instanceId):''}</div></div>${t.balanceCheck?.pendingQuote?'<p class="dialog-note">等待完整报价后核对余额。</p>':t.balanceCheck?`<p class="dialog-note">最近余额预检：可用 ¥${esc(t.balanceCheck.available)} / 所需 ¥${esc(t.balanceCheck.required)}，按${t.balanceCheck.basis==='limits'?'价格上限':'实际报价'}及预计 ${esc(t.balanceCheck.hours)} 小时估算，${t.balanceCheck.includeVouchers?'含':'不含'}代金券。预检于 ${time(t.balanceCheck.checkedAt,true)}。</p>`:''}${t.lastError?`<div class="notice">${esc(t.lastError)}</div>`:''}${(t.hostCooldowns||[]).some(r=>r.until>appState.now)?`<p class="dialog-note">暂缓重试的主机：${(t.hostCooldowns||[]).filter(r=>r.until>appState.now).map(r=>esc(r.hostNumber||r.hostId)+' 约 '+Math.max(1,Math.ceil((r.until-appState.now)/60000))+' 分钟后，'+esc(r.reason)).join('；')}</p>`:''}${t.quote?`<p class="dialog-note">最后报价：配置 ¥${t.quote.hourly}/时，磁盘 ¥${t.quote.storageDaily}/日，额外扩容 ${t.quote.extraDiskGB} GB。实际费用按运行时长计费，需自行关机。</p>`:''}<div class="detail-actions">${ACTIVE.includes(t.state)?`<button class="button small" data-command="pause" data-id="${t.id}">暂停检查</button>`:''}${canResumeTask(t)?`<button class="button small" data-command="resume" data-id="${t.id}">${canReconcileBoot(t)?'继续核对原实例':'恢复检查'}</button>`:''}${!['completed','cancelled'].includes(t.state)?`<button class="button small danger" data-command="cancel" data-id="${t.id}">停止本地任务</button>`:''}</div>${c.mode!=='boot'&&t.operation&&['attention','reconciling','paused','cancelled'].includes(t.state)?`<form class="inline-form" id="attach-form"><label>核对 AutoDL 后，填写此次创建的目标实例 ID<input name="instanceId" placeholder="目标完整 ID，不是源实例" required></label><button class="button small" type="submit">校验并绑定</button></form>`:''}${c.mode!=='boot'&&t.operation&&!t.operation.receipt?.instanceId&&['click_started','accepted'].includes(t.operation.stage)&&['attention','reconciling','paused','cancelled'].includes(t.state)?`<div class="notice"><p>未找到新实例时，可在提交至少 2 分钟后重新核对。确认未创建后，才能恢复或新建任务。</p><button type="button" class="button small" data-command="recheck" data-id="${t.id}">重新核对实例列表</button></div>`:''}${t.operation?.receipt&&c.mode==='clone'&&c.copyDataDisk!==false&&['attention','verifying','paused'].includes(t.state)?`<div class="notice"><p>请先登录目标实例，确认数据盘文件完整，再提交核验。</p><label class="check-label"><input type="checkbox" id="data-confirmed">我已检查目标数据盘，数据复制完整</label><button type="button" class="button small" data-command="verify-data" data-id="${t.id}">提交人工数据核验</button></div>`:''}${window.taskMonitor.history(t)}<div class="logs"><div class="logs-heading"><h3>运行日志 <span class="count">${t.logs.length}</span></h3><button type="button" class="button small" data-export-logs="${esc(t.id)}">导出日志</button></div><div class="log-list">${[...t.logs].reverse().map(l=>`<div class="log ${esc(l.level)}" data-key="${esc(l.at+':'+l.message.slice(0,40))}"><time>${time(l.at)}</time><span>${esc(l.message)}</span></div>`).join('')}</div></div>`;
+  const branch = winningBranch(t);
+  const html=`<div id="detail-state">${badge(t.state,branch)} ${c.raceBoot?taskModeLabel(t)+' · ':''}${c.action==='execute'?'发现后自动提交':'仅监测通知'}</div><div class="detail-grid"><div><small>资源条件</small>${esc(c.gpuModel)} × ${c.gpuCount} / ${esc(taskCuda(t))}<br>${esc(c.regions.join('、'))}<br>${c.pollSeconds}s 检查间隔 · ${esc(scanLabel(c))}</div><div><small>${branch==='boot'?'原实例计费':c.raceBoot&&!branch?'组合计费':c.pricePolicy==='official'?'平台报价':'单价边界'}</small>${branch==='boot'?'沿用原实例计费方式，价格请在 AutoDL 确认。':c.raceBoot&&!branch?'原实例沿用原计费方式；同区克隆按提交时的平台报价创建并开机，原实例保留。':c.pricePolicy==='official'?(t.quote?`按平台报价：单卡 ¥${esc(t.quote.host?.price)}/时<br>配置 ¥${esc(t.quote.hourly)}/时，磁盘 ¥${esc(t.quote.storageDaily)}/日`:'按提交时的平台报价，等待完整报价'):`单卡 ≤ ¥${esc(c.maxGpuHourly)}/时<br>配置总价 ≤ ¥${esc(c.maxTotalHourly)}/时，磁盘 ≤ ¥${esc(c.maxStorageDaily)}/日`}</div><div><small>${branch==='boot'?'要开机的原实例':c.mode==='clone'?'源实例':'基础镜像'}</small>${esc(c.mode!=='create'?c.sourceId:c.imagePath.join(' / ')||'待核对')}${branch==='clone'?(t.source?'<br>源实例 '+esc(t.source.gpuModel||'型号未知')+' × '+esc(t.source.gpuCount??'?')+' · '+esc(t.source.sourceCuda?'CUDA '+t.source.sourceCuda:'CUDA 待读取')+'（只读）':'')+'<br>'+(c.copyDataDisk!==false?'含数据盘复制':'仅系统盘，未复制数据盘'):''}</div><div><small>提交状态</small>${t.operation?esc({intent:'操作意图已保存',click_started:'已进入点击，结果需核对',accepted:'已提交，继续核对实例'}[t.operation.stage]||t.operation.stage):'尚未提交'}<br>${t.operation?.receipt?.instanceId?esc(t.operation.receipt.instanceId):''}</div></div>${t.balanceCheck?.pendingQuote?'<p class="dialog-note">等待完整报价后核对余额。</p>':t.balanceCheck?`<p class="dialog-note">最近余额预检：可用 ¥${esc(t.balanceCheck.available)} / 所需 ¥${esc(t.balanceCheck.required)}，按${t.balanceCheck.basis==='limits'?'价格上限':'实际报价'}及预计 ${esc(t.balanceCheck.hours)} 小时估算，${t.balanceCheck.includeVouchers?'含':'不含'}代金券。预检于 ${time(t.balanceCheck.checkedAt,true)}。</p>`:''}${t.lastError?`<div class="notice">${esc(t.lastError)}</div>`:''}${(t.hostCooldowns||[]).some(r=>r.until>appState.now)?`<p class="dialog-note">暂缓重试的主机：${(t.hostCooldowns||[]).filter(r=>r.until>appState.now).map(r=>esc(r.hostNumber||r.hostId)+' 约 '+Math.max(1,Math.ceil((r.until-appState.now)/60000))+' 分钟后，'+esc(r.reason)).join('；')}</p>`:''}${t.quote&&branch!=='boot'?`<p class="dialog-note">最后报价：配置 ¥${t.quote.hourly}/时，磁盘 ¥${t.quote.storageDaily}/日，额外扩容 ${t.quote.extraDiskGB} GB。实际费用按运行时长计费，需自行关机。</p>`:''}<div class="detail-actions">${ACTIVE.includes(t.state)?`<button class="button small" data-command="pause" data-id="${t.id}">暂停检查</button>`:''}${canResumeTask(t)?`<button class="button small" data-command="resume" data-id="${t.id}">${canReconcileBoot(t)?'继续核对原实例':'恢复检查'}</button>`:''}${!['completed','cancelled'].includes(t.state)?`<button class="button small danger" data-command="cancel" data-id="${t.id}">停止本地任务</button>`:''}</div>${(branch==='clone'||branch==='create')&&t.operation&&['attention','reconciling','paused','cancelled'].includes(t.state)?`<form class="inline-form" id="attach-form"><label>核对 AutoDL 后，填写此次创建的目标实例 ID<input name="instanceId" placeholder="目标完整 ID，不是源实例" required></label><button class="button small" type="submit">校验并绑定</button></form>`:''}${(branch==='clone'||branch==='create')&&t.operation&&!t.operation.receipt?.instanceId&&['click_started','accepted'].includes(t.operation.stage)&&['attention','reconciling','paused','cancelled'].includes(t.state)?`<div class="notice"><p>${c.raceBoot?'提交后至少等待 2 分钟再核对。组合任务会保留本次克隆记录，不会转为开机或重复提交。':'未找到新实例时，可在提交至少 2 分钟后重新核对。确认未创建后，才能恢复或新建任务。'}</p><button type="button" class="button small" data-command="recheck" data-id="${t.id}">重新核对实例列表</button></div>`:''}${t.operation?.receipt&&branch==='clone'&&c.copyDataDisk!==false&&['attention','verifying','paused'].includes(t.state)?`<div class="notice"><p>请先登录目标实例，确认数据盘文件完整，再提交核验。</p><label class="check-label"><input type="checkbox" id="data-confirmed">我已检查目标数据盘，数据复制完整</label><button type="button" class="button small" data-command="verify-data" data-id="${t.id}">提交人工数据核验</button></div>`:''}${window.taskMonitor.history(t)}<div class="logs"><div class="logs-heading"><h3>运行日志 <span class="count">${t.logs.length}</span></h3><button type="button" class="button small" data-export-logs="${esc(t.id)}">导出日志</button></div><div class="log-list">${[...t.logs].reverse().map(l=>`<div class="log ${esc(l.level)}" data-key="${esc(l.at+':'+l.message.slice(0,40))}"><time>${time(l.at)}</time><span>${esc(l.message)}</span></div>`).join('')}</div></div>`;
   const content=$('#detail-content');if(content.dataset.html===html)return;
   // 记下日志区里看到的第一条，重写后把它放回同一位置；位于最上方时保持在最上方，便于看到新日志。
   const dialog=$('#task-dialog'),oldList=content.querySelector('.log-list'),dialogTop=dialog.scrollTop;
@@ -310,9 +319,19 @@ async function refresh(){
 async function perform(command,id,data={}){
   if(command==='cancel'&&!confirm('停止后不再检查。云端已创建的实例和磁盘会保留，仍可能计费，需到 AutoDL 管理。继续停止本地任务？'))return;
   if(command==='verify-data'){if(!$('#data-confirmed')?.checked){toast('请先确认已核验目标数据盘的文件完整',true);return;}data.confirmed=true;}
-  if(command==='recheck'){if(!confirm('将只读重新读取 AutoDL 实例列表。没有新增实例时清除此次提交记录；有新增实例时保留记录，请核对后绑定。继续？'))return;data.confirmed=true;}
+  if(command==='recheck'){
+    const combo = appState.tasks.find(task => task.id===id)?.config.raceBoot;
+    const message = combo ? '仅重新读取实例列表。本次克隆记录将保留，不再开机或重复提交。继续核对？' : '将只读重新读取 AutoDL 实例列表。没有新增实例时清除此次提交记录；有新增实例时保留记录，请核对后绑定。继续？';
+    if(!confirm(message))return;
+    data.confirmed=true;
+  }
   try{const result=await api(`/api/tasks/${id}/${command}`,data);
-    toast(command==='attach'?'目标实例已绑定':command==='recheck'?(result.result?.cleared?'核对完成：没有新增实例，已清除此次提交记录':'实例列表有提交前没有的实例 '+(result.result?.extra||[]).map(i=>i.id).slice(0,3).join('、')+'，请核对后绑定'):'任务已更新',command==='recheck'&&!result.result?.cleared);
+    if(command==='recheck'){
+      const checked=result.result;
+      if(checked.cleared) toast('核对完成：没有新增实例，已清除此次提交记录');
+      else if(checked.extra?.length) toast('实例列表有提交前没有的实例 '+checked.extra.map(i=>i.id).slice(0,3).join('、')+'，请核对后绑定',true);
+      else toast('尚未查到新增实例；本次提交记录已保留，请在 AutoDL 核对结果。',true);
+    } else toast(command==='attach'?'目标实例已绑定':'任务已更新');
     await refresh();}catch(e){toast(e.message,true);}
 }
 function closeAccountMenu(restoreFocus=false){
@@ -385,7 +404,7 @@ $('#account-menu-logout').addEventListener('click',()=>{
 });
 $$('[data-mode]').forEach(button=>button.addEventListener('click',()=>{
   if(currentMode==='create'&&button.dataset.mode!=='create')window.rememberAccountResource?.();
-  currentMode=button.dataset.mode;$('#task-form').elements.paidConsent.checked=false;$$('[data-mode]').forEach(b=>{b.classList.toggle('active',b===button);b.setAttribute('aria-selected',b===button);});
+  $('#task-form').elements.raceBoot.checked=false;currentMode=button.dataset.mode;$('#task-form').elements.paidConsent.checked=false;$$('[data-mode]').forEach(b=>{b.classList.toggle('active',b===button);b.setAttribute('aria-selected',b===button);});
   const selected=$$('input[name=region]:checked').map(n=>n.value);regions(selected);updateForm();
   // 每种模式从第一项配置开始，保留已填值，只重置面板滚动位置。
   $('.config-fields').scrollTop=0;
@@ -421,6 +440,8 @@ function taskPayload(form=$('#task-form')) {
   const data=Object.fromEntries(new FormData(form));
   data.gpuModel=selectedGpuModel();data.gpuCount=form.elements.gpuCount.value;delete data.customGpuModel;
   data.provider='autodl';data.pricePolicy='official';
+  if(currentMode==='clone') data.raceBoot=raceEnabled();
+  else delete data.raceBoot;
   data.mode=currentMode;data.regions=$$('input[name=region]:checked').map(n=>n.value);delete data.region;
   data.imagePath=form.elements.imagePath.value.split('/').map(s=>s.trim()).filter(Boolean);
   for(const key of ['paidConsent','copyDataDisk','balanceGuard','includeVouchers']) data[key]=form.elements[key].checked;
@@ -435,13 +456,15 @@ function showTaskConflict(error, data) {
     gpuModel:previous.config.gpuModel,cuda:previous.config.cuda,regions:previous.config.regions,
     lastError:previous.lastError,hasOperation:!!previous.operation,replaceable:false}:null);
   if(!conflict){toast(error.message+'。请查看下方任务列表。',true);return;}
+  const original=appState.tasks.find(t=>t.id===conflict.id);
   pendingConflict={data:structuredClone(data),signature:JSON.stringify(data),conflict};
   $('#conflict-old').textContent=conflict.name+' · '+(STATES[conflict.state]||conflict.state)+' · '+conflict.gpuModel+' · '+(conflict.cuda?'CUDA '+conflict.cuda:'CUDA 跟随源实例')+' · '+(conflict.regions||[]).join(' / ');
   $('#conflict-error').textContent=conflict.lastError?'旧任务原因：'+conflict.lastError:conflict.hasOperation?'旧任务已有提交记录。':'旧任务尚未提交。';
-  $('#conflict-current').textContent=modeLabel(data.mode)+' · '+data.gpuModel+' × '+data.gpuCount+' · '+(data.mode==='boot'?'保留原环境':data.mode==='clone'?'CUDA 跟随源实例':'CUDA '+data.cuda)+' · '+data.regions.join(' / ')+(data.action==='execute'?'；符合条件后按当前授权自动提交并开机。':'；仅监测库存并通知。');
+  $('#conflict-current').textContent=(data.raceBoot?'原实例开机或同区克隆':modeLabel(data.mode))+' · '+data.gpuModel+' × '+data.gpuCount+' · '+(data.mode==='boot'?'保留原环境':data.mode==='clone'?'CUDA 跟随源实例':'CUDA '+data.cuda)+' · '+data.regions.join(' / ')+(data.action==='execute'?'；符合条件后按当前授权自动提交并开机。':'；仅监测库存并通知。');
   $('#conflict-help').textContent=!error.conflict?'后台版本不匹配，请正常退出并重新启动助手。当前表单已保留。'
     :conflict.replaceable?'可以保留当前配置并重建。新配置、源实例及余额校验通过后，旧任务才会停止；原配置和日志继续保留。'
-    :data.mode==='boot'&&conflict.hasOperation?'原实例已有开机请求，请在原任务中恢复检查。':conflict.hasOperation?'原任务提交结果待确认。已创建时请绑定目标实例；未创建时点击“重新核对实例列表”。停止任务不会撤销云端租用。'
+    :conflict.hasOperation&&original?.config.raceBoot&&winningBranch(original)==='clone'?'原组合任务已提交克隆。请在原任务核对并绑定新实例；此次记录将保留。'
+    :conflict.hasOperation&&(original?winningBranch(original)==='boot':conflict.mode==='boot')?'原实例已有开机请求，请在原任务中恢复检查。':conflict.hasOperation?'原任务提交结果待确认。已创建时请绑定目标实例；未创建时点击“重新核对实例列表”。停止任务不会撤销云端租用。'
     :'旧任务仍在运行或等待处理。请先查看并暂停原任务，再按当前配置重建。';
   $('#replace-task').hidden=!conflict.replaceable||!error.conflict;
   $('#replace-task').disabled=conflictBusy;
@@ -454,6 +477,9 @@ async function taskCreated(replaced=false) {
 $('#task-form').addEventListener('invalid',event=>{for(let node=event.target.parentElement;node&&node!==event.currentTarget;node=node.parentElement)if(node.tagName==='DETAILS')node.open=true;},true);
 $('#task-form').addEventListener('submit',async e=>{
   e.preventDefault();const form=e.target,button=$('#submit-task'),data=taskPayload(form);
+  if(data.raceBoot && (!window.pickedSource?.()?.bootable || !window.pickedSource?.()?.cloneable || data.balanceGuard)){
+    toast('请选择支持开机和克隆的已关机原实例，并先关闭余额保护。',true);return;
+  }
   if(currentMode==='boot'&&!window.pickedSource?.()?.bootable){toast('请同步并选择可开机的原实例；无卡运行中的实例需先手动关机',true);return;}
   if(!data.gpuModel){toast('请选择 GPU 精确型号，或填写其他型号',true);return;}
   if(!data.regions.length){toast('请至少选择一个地区',true);return;}

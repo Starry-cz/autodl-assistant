@@ -1,9 +1,10 @@
 'use strict';
 let accountBusy = null, instanceSignature = null, sourceLocked = false, manualResource = null, appliedSource = null;
+let raceSourceTerms = null;
 let pricingSnapshot = null, pricingFormSignature = null, pricingError = '', pricingRevision = 0, walletSettingsLoaded = false;
 function currentPricingSignature() {
   const c=taskPayload();
-  return JSON.stringify([c.provider,c.mode,c.gpuModel,c.gpuCount,c.regions,c.cuda,c.sourceId,c.imagePath,c.copyDataDisk,c.extraDiskGB]);
+  return JSON.stringify([c.provider,c.mode,c.gpuModel,c.gpuCount,c.regions,c.cuda,c.sourceId,c.imagePath,c.copyDataDisk,c.extraDiskGB,c.raceBoot]);
 }
 function clearPricing() { pricingSnapshot=null;pricingFormSignature=null;pricingError='';pricingRevision++;renderPricing(); }
 function currentQuote() {
@@ -54,11 +55,23 @@ function updateAccountForm() {
   if(!locked)appliedSource=null;
   sourceLocked=locked;
   const source=locked?pickedSource():null;
+  const race = raceEnabled();
+  const eligible = !!(source?.bootable && source.cloneable && !appState.autodlInstances?.error && accountReady());
+  // 若后台同步改变源实例的规格，旧授权不再适用于这个组合。
+  const terms = race && eligible ? JSON.stringify([source.id, source.region, source.gpuModel, source.gpuCount]) : null;
+  if (terms !== raceSourceTerms) form.elements.paidConsent.checked = false;
+  raceSourceTerms = terms;
+  const guard = form.elements.balanceGuard;
+  const reason = guard.checked ? '组合任务不支持余额保护；请先手动取消余额保护。' : !eligible ? '请先选择支持开机和克隆的已关机原实例。' : '';
+  $('#race-help').textContent = reason || (race ? '两处同时有卡时优先开原实例。克隆使用同地区、同型号和相同卡数。' : '');
+  form.elements.raceBoot.disabled = !race && !!reason;
+  guard.disabled = boot || race;
+  $('#boot-or-clone').disabled = !eligible;
   if(source&&(boot?source.bootable:source.cloneable)&&!appState.autodlInstances?.error&&accountReady()) {
     // 克隆只能在源实例所在地区，地区锁定。GPU 型号和数量在选中源实例时带入源实例的规格，之后可以改成其他型号或数量。
     // 地区按钮已是源实例所在地区时不重建（每2秒刷新一次，重建会让按钮失去焦点）。
     if(checkedRegions().join('|')!==source.region||$('#regions input')?.type!=='radio')regions([source.region]);
-    if(appliedSource!==currentMode+':'+source.id){keepGpuModel(source.gpuModel,'源实例型号');form.elements.gpuCount.value=String(source.gpuCount);appliedSource=currentMode+':'+source.id;}
+    if(appliedSource!==currentMode+':'+source.id || (race && (selectedGpuModel()!==source.gpuModel || form.elements.gpuCount.value!==String(source.gpuCount)))){keepGpuModel(source.gpuModel,'源实例型号');form.elements.gpuCount.value=String(source.gpuCount);appliedSource=currentMode+':'+source.id;}
     updateGpuSelection();
     const model=selectedGpuModel(),changed=!!model&&(gpuIdentity(model)!==gpuIdentity(source.gpuModel)||form.elements.gpuCount.value!==String(source.gpuCount));
     const text=boot?source.region+' · '+source.gpuModel+' × '+source.gpuCount+'。沿用原配置与计费。'+(source.starting?'正在开机，等待确认。':source.status==='运行中'?'已运行，需核对 GPU 状态。':source.gpuAvailable===false?'GPU 不足，等待空卡。':source.gpuAvailable===true?'GPU 可用，执行前重新核对。':'启动监测后检查 GPU 库存。'):source.region+' · '+source.gpuModel+' × '+source.gpuCount+'。同地区克隆，源实例保留。'
@@ -66,8 +79,8 @@ function updateAccountForm() {
     if($('#source-summary').textContent!==text)$('#source-summary').textContent=text;
   } else if(locked) $('#source-summary').textContent=boot?'请选择原实例；无卡运行中的实例需先在官网关机。':'请选择地区和型号可识别的已关机实例。';
   // 克隆只锁地区；源实例本身只被读取，程序不会改动它。
-  form.elements.gpuModel.disabled=boot;form.elements.gpuCount.disabled=boot;
-  form.elements.customGpuModel.disabled=boot||form.elements.gpuModel.value!==CUSTOM_GPU_MODEL;
+  form.elements.gpuModel.disabled=boot||race;form.elements.gpuCount.disabled=boot||race;
+  form.elements.customGpuModel.disabled=boot||race||form.elements.gpuModel.value!==CUSTOM_GPU_MODEL;
   form.elements.customGpuModel.required=!boot&&form.elements.gpuModel.value===CUSTOM_GPU_MODEL;
   $$('input[name=region]').forEach(n=>n.disabled=locked);
   form.elements.sourceId.disabled=!locked;form.elements.sourceId.required=locked;
@@ -133,6 +146,33 @@ async function syncAccountInstances() {
 }
 $('#sync-instances').addEventListener('click',()=>void syncAccountInstances());
 $('#refresh-sources').addEventListener('click',()=>void syncAccountInstances());
+// 开机页的快捷入口只填入当前源实例；沿用同一个任务表单及费用确认。
+$('#boot-or-clone').addEventListener('click', () => {
+  const form = $('#task-form'), source = pickedSource();
+  if (!source?.cloneable || !source.bootable) return;
+  $('[data-mode="clone"]').click();
+  form.elements.sourceId.value = source.id;
+  if (form.elements.balanceGuard.checked) {
+    $('#balance-options').open = true;
+    form.elements.balanceGuard.focus();
+    toast('请先手动取消余额保护，再启用组合任务。', true);
+  } else {
+    form.elements.raceBoot.checked = true;
+    form.elements.raceBoot.focus();
+  }
+  form.elements.paidConsent.checked = false;
+  updateForm();
+});
+$('#task-form').elements.raceBoot.addEventListener('change', () => {
+  $('#task-form').elements.paidConsent.checked = false;
+  updateForm();
+});
+// 组合的付费分支包含克隆盘费用，改变源、容量或复制范围必须重新授权。
+$('#task-form').addEventListener('input', event => {
+  if (raceEnabled() && ['sourceId','extraDiskGB','copyDataDisk'].includes(event.target.name)) {
+    $('#task-form').elements.paidConsent.checked = false;
+  }
+});
 $('#task-form').elements.sourceId.addEventListener('change',updateAccountForm);
 $('#task-form').addEventListener('input',renderBudget);
 $('#task-form').addEventListener('change',updateAccountForm);
@@ -149,7 +189,7 @@ $('#wallet-form').addEventListener('submit',e=>{e.preventDefault();const f=e.tar
 $('#refresh-wallet').addEventListener('click',()=>void accountCommand('wallet',async()=>{const result=await api('/api/wallet/refresh',{});appState.wallet=result.wallet;toast('余额已更新');}));
 $('#clear-wallet').addEventListener('click',()=>void accountCommand('wallet',async()=>{const result=await api('/api/wallet/clear-token',{});appState.wallet=result.wallet;walletSettingsLoaded=false;$('#wallet-form').elements.token.value='';toast('余额 Token 已清除');}));
 $('#check-budget').addEventListener('click',()=>void accountCommand('budget',async()=>{const result=await api('/api/wallet/preflight',taskPayload());appState.wallet=result.wallet;toast('余额预检通过，提交前重新核对');}));
-function resetAccountState(){walletSettingsLoaded=false;instanceSignature=null;$('#wallet-form').reset();clearPricing();}
+function resetAccountState(){$('#task-form').elements.raceBoot.checked=false;raceSourceTerms=null;walletSettingsLoaded=false;instanceSignature=null;$('#wallet-form').reset();clearPricing();}
 // 实例列表的按钮只填入任务，不会立即开机；仍需在表单里确认费用并点击开始。
 $('#account-instances').addEventListener('click',e=>{const button=e.target.closest('[data-source],[data-boot]');if(!button||button.disabled)return;const f=$('#task-form'),boot=!!button.dataset.boot;document.querySelector('[data-mode='+ (boot?'boot':'clone') +']').click();f.elements.sourceId.value=button.dataset.boot||button.dataset.source;updateAccountForm();$('#live-source-fields').scrollIntoView({block:'center',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});});
 window.addEventListener('appstatechange',renderAccount);

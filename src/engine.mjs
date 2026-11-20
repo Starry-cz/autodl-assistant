@@ -7,6 +7,9 @@ import { validateBootSource } from './instances.mjs';
 import { beginCheck, finishCheck, marketSample, bootSample, failedSample } from './task-monitor.mjs';
 const ACTIVE = new Set(['queued', 'watching', 'preparing', 'submitting', 'verifying']);
 const stopped = t => ['paused', 'cancelled'].includes(t.state);
+// 组合任务只有一份提交记录；一旦进入点击，后续路径由已落盘的操作类型决定。
+const bootRace = t => t.config.mode === 'clone' && t.config.raceBoot === true;
+const bootPath = t => t.config.mode === 'boot' || bootRace(t) && t.operation?.kind === 'boot';
 // 点击前余额结果最多可沿用的时长；发现候选时已并行刷新，正常情况下不再额外请求。
 const BALANCE_CLICK_MAX_AGE = 15000;
 // 人工要求重新核对点击结果前，距点击至少经过的时间。
@@ -51,7 +54,8 @@ export class Engine {
       // 只落盘了操作意图、还没进入点击：不论任务此时是暂停、已停止还是进行中，都清除这条记录（适配器必须在 mark 之后才点击）。
       // 否则暂停后进程被强行结束，这条意图会永久挡住恢复、重新核对和同型号/同源的新任务。
       if (t.operation?.stage === 'intent') {
-        this.store.patch(t, { state: ACTIVE.has(t.state) ? 'paused' : t.state, operation: null });
+        this.store.patch(t, { state: ACTIVE.has(t.state) ? 'paused' : t.state, operation: null,
+          ...(bootRace(t) ? { raceWinner: null, result: null, lastProgress: null } : {}) });
         this.store.log(t, 'warn', ACTIVE.has(t.state) ? '服务重启：此前尚未进入提交点击，任务已暂停，可恢复重新检查' : '服务重启：清除了尚未进入点击的操作意图（没有点击付费按钮）');
         continue;
       }
@@ -156,17 +160,20 @@ export class Engine {
   }
   async step(t) {
     if(t.config.provider!=='autodl' || stopped(t) || this.stopping) return;
+    // 恢复会更新 notifyEpoch；暂停后立即恢复也不能让上一轮迟到的观察继续点击。
+    const epoch = t.notifyEpoch || 0;
+    const interrupted = () => stopped(t) || this.stopping || bootRace(t) && (t.notifyEpoch || 0) !== epoch;
     // 每轮先确认账号；不允许在另一个已登录账号里继续原任务。
     if(this.verifyOwner) {
       try { await this.verifyOwner(t); }
       catch(error) {
         // 核验响应可能晚于用户取消或正常停机，不能再覆盖已确定的任务状态。
-        if (stopped(t) || this.stopping) return;
+        if (interrupted()) return;
         this.store.patch(t,{state:'paused',lastError:redact(messageOf(error))});this.store.log(t,'warn',redact(messageOf(error)));return;
       }
     }
-    if (stopped(t) || this.stopping) return;
-    if(t.config.mode === 'boot') return this.stepBoot(t);
+    if (interrupted()) return;
+    if (bootPath(t)) return this.stepBoot(t, { epoch });
     const adapter = this.adapters[t.config.provider];
     let roundStart = this.clock(), clickedAt = null, phase = 'probe', candidateHost = null;
     try {
@@ -176,12 +183,25 @@ export class Engine {
       }
       roundStart = this.clock();
       this.store.patch(t, { state: 'watching', attempts: t.attempts + 1 });
+      if (bootRace(t)) {
+        // 共用工作页只能顺序检查。明确有卡优先原机；未知库存不试探付费开机，继续检查同区克隆。
+        const original = await this.monitorRead(t, 'boot', 'target', async () => validateBootSource(t.config, await adapter.inspectBoot(t)),
+          value => bootSample(value, this.clock()));
+        if (interrupted()) return;
+        // 仅观察到外部启动不等于本任务已提交；重新确认关机后仍可参与两路检查。
+        // 上一轮只是观察原机时，不能把原机 ID 或“有卡”文案当成本轮克隆的结果。
+        if (t.raceWinner || t.result || t.lastProgress) this.store.patch(t, { raceWinner: null, result: null, lastProgress: null });
+        if (original.running || original.starting || original.gpuAvailable === true && !t.raceBootDeferred)
+          return this.stepBoot(t, { observed: original, roundStart, epoch });
+        // 原机刚明确拒绝缺卡时，下一轮仍核验它的状态，但给克隆一次检查机会，避免陈旧“有卡”标记饿死克隆。
+        if (t.raceBootDeferred) this.store.patch(t, { raceBootDeferred: false });
+      }
       const scope = this.scanScope(t);
       // 最近被平台拒绝下单的主机本轮不选（例如“当前主机存储库存已满”，列表上仍显示有空闲 GPU）。
       const cooled = host => isCooled(t.hostCooldowns, host, this.clock());
       const observation = await this.monitorRead(t, 'market', scope, () => adapter.probe(t, { scope, skip: cooled }),
         value => marketSample(t.config, value, { at: this.clock(), scope }));
-      if (t.state === 'paused' || t.state === 'cancelled' || this.stopping) return;
+      if (interrupted()) return;
       if (observation.source) {
         // 克隆的环境来自源实例：首次读到或有变化时写一条日志，说明按什么筛选目标主机。
         const before = t.source, now = observation.source;
@@ -198,7 +218,7 @@ export class Engine {
         complete: observation.complete === true, summary, candidate: host || null }, lastError: null,
         ...(observation.complete === true ? { lastFullScanAt: roundStart } : {}) });
       const short = await this.lowBalance(t, usable, host);
-      if (t.state === 'paused' || t.state === 'cancelled' || this.stopping) return;
+      if (interrupted()) return;
       if (!host) { this.store.patch(t, { retryStreak: 0 }); this.store.log(t, 'info', summary || '暂无同时满足型号、CUDA、容量及预算的 GPU'); this.schedule(t, { from: roundStart }); return; }
       // 记录命中的候选，之后核验失败时日志能看出失败发生在配置报价阶段。
       this.store.log(t, 'info', `${summary || '找到合格候选'}。候选：${host.region} ${host.number ? host.number + ' ' : ''}${host.gpuModel}，空闲 ${host.available}${host.total ? '/' + host.total : ''}，单卡 ¥${host.price}/时；${short ? (t.balanceLow?.kind === 'token' ? '没有连接余额 Token，未核验和提交' : '余额不足，未核验和提交，请先充值') : '开始核验配置与完整报价'}`);
@@ -213,13 +233,13 @@ export class Engine {
       if (guarded) void this.wallet.refresh({ force: true }).catch(() => {});
       this.store.patch(t, { state: 'preparing' });
       const quote = await adapter.prepare(t, host, observation.source);
-      if (t.state === 'paused' || t.state === 'cancelled' || this.stopping) return;
+      if (interrupted()) return;
       const reasons = verifyQuote(quote, t.config, observation.source);
       if (reasons.length) throw new AppError('QUOTE', `提交前校验未通过：${reasons.join('、')}`);
       this.store.patch(t, { quote, retryStreak: 0 });
       const prepared = quote.timing ? `配置核验用时 ${(quote.timing.totalMs / 1000).toFixed(1)} 秒（${quote.timing.reused ? '沿用扫描页面' : '重新打开页面'}，实例基线并行读取）` : '配置核验完成';
       if (t.config.action === 'observe') {
-        this.store.patch(t, { state: 'found', errors: 0 }); this.store.log(t, 'info', `${prepared}；发现符合条件的 GPU，已停止在付费提交之前`);
+        this.store.patch(t, { state: 'found', errors: 0, ...(bootRace(t) ? { raceWinner: 'clone' } : {}) }); this.store.log(t, 'info', `${prepared}；发现符合条件的 GPU，已停止在付费提交之前`);
         this.alert(t, 'found', `找到 ${host.region} ${t.config.gpuModel} × ${t.config.gpuCount}，配置报价 ¥${quote.hourly}/时，磁盘 ¥${quote.storageDaily}/日；当前为仅监测任务，未租用`); return;
       }
       const checkBalance = async (freshQuote, maxAge) => {
@@ -229,15 +249,16 @@ export class Engine {
         this.store.patch(t, { balanceCheck: result });
       };
       await checkBalance(quote);
-      if (stopped(t) || this.stopping) return;
+      if (interrupted()) return;
       const op = { id: randomUUID(), stage: 'intent', at: this.clock(), quote,
-        baselineIds: quote.baselineIds, sourceId: t.config.sourceId };
-      this.store.patch(t, { operation: op, state: 'submitting' });
+        baselineIds: quote.baselineIds, sourceId: t.config.sourceId, ...(bootRace(t) ? { kind: 'clone' } : {}) };
+      this.store.patch(t, { operation: op, state: 'submitting', ...(bootRace(t) ? { raceWinner: 'clone' } : {}) });
       this.store.log(t, 'info', `${prepared}；操作意图已落盘，准备一次性提交`);
       phase = 'submit';
       const receipt = await adapter.submit(t, quote, () => {
         if (this.stopping) throw new AppError('ENGINE_STOPPING', '后台正在停止，未点击付费按钮');
         if (t.state === 'paused' || t.state === 'cancelled') throw new AppError('STOPPED', '任务已暂停，未点击付费按钮');
+        if (interrupted()) throw new AppError('STOPPED', '任务已重新恢复，上一轮未点击付费按钮');
         // 页面准备和余额核对可能跨过截止时间，真正点击前再检查一次。
         if (this.clock() >= t.deadlineAt) throw new AppError('TASK_DEADLINE', '监测时限已到，未点击租用提交按钮');
         if (t.config.provider === 'autodl' && t.config.balanceGuard) this.wallet.confirm(t.balanceCheck);
@@ -251,7 +272,8 @@ export class Engine {
       this.store.log(t, 'info', `提交已返回（本轮开始到点击 ${((clickedAt - roundStart) / 1000).toFixed(1)} 秒），正在核对目标实例与数据盘进度`);
       this.schedule(t);
     } catch (error) {
-      if (t.operation?.stage === 'intent') this.store.patch(t, { operation: null });
+      if (t.operation?.stage === 'intent') this.store.patch(t, { operation: null, ...(bootRace(t) ? { raceWinner: null, result: null, lastProgress: null } : {}) });
+      if (bootRace(t) && (t.notifyEpoch || 0) !== epoch) return;
       if (error.code === 'TASK_DEADLINE') {
         this.store.patch(t, { state: 'expired' }); this.store.log(t, 'info', error.message);
         this.alert(t, 'expired', '监测时限已到，尚未提交租用'); return;
@@ -264,7 +286,7 @@ export class Engine {
       if (error.code === 'SUBMIT_LATE' && Array.isArray(error.lateIds)) this.store.patch(t, { lateInstanceIds: error.lateIds });
       const clickNote = clickedAt ? `（本轮开始到点击 ${((clickedAt - roundStart) / 1000).toFixed(1)} 秒）` : '';
       // 点击后平台明确拒绝，且两次读取实例列表都没有新实例：清除提交记录，保留拒绝证据，供后续检查延迟创建。
-      if (t.operation?.stage === 'click_started' && error.notCreated === true) {
+      if (t.operation?.stage === 'click_started' && error.notCreated === true && (!bootRace(t) || error.unrecognized !== true)) {
         const rejection = { at: this.clock(), message: redact(messageOf(error)).slice(0, 300), operationId: t.operation.id,
           baselineIds: t.operation.baselineIds || [], hostNumber: t.operation.quote?.host?.number || '' };
         // 没有识别出原因的未创建连续出现时提醒一次（例如页面需要人工确认），但不停止，继续监测。
@@ -272,6 +294,7 @@ export class Engine {
         // 与主机有关的拒绝（不含账户问题、GPU 架构不符）：这台主机暂时不选，下一轮试其他主机。
         const cool = error.race === true ? coolHost(t.hostCooldowns, t.operation.quote?.host, messageOf(error), this.clock()) : null;
         this.store.patch(t, { operation: null, unclearStreak: streak, submitRejections: [...(t.submitRejections || []), rejection].slice(-5),
+          ...(bootRace(t) ? { raceWinner: null, result: null, lastProgress: null } : {}),
           ...(cool?.record ? { hostCooldowns: cool.list } : {}) });
         this.store.log(t, 'warn', `${error.unrecognized ? '点击后没有识别出结果' : '点击后平台拒绝创建'}${clickNote}，两次核对实例列表均无新实例，已清除本次提交记录`
           + (cool?.record ? `；${cool.record.hostNumber || '该主机'}约 ${Math.round((cool.record.until - cool.record.at) / 60000)} 分钟内不再选择，先试其他主机` : ''));
@@ -353,8 +376,9 @@ export class Engine {
     }
   }
   // 开机始终绑定原实例。与新租用分开执行，不进入主机筛选、创建、克隆或关机路径。
-  async stepBoot(t) {
+  async stepBoot(t, { observed = null, roundStart = this.clock(), epoch = t.notifyEpoch || 0 } = {}) {
     if (stopped(t) || this.stopping) return;
+    const interrupted = () => stopped(t) || this.stopping || bootRace(t) && (t.notifyEpoch || 0) !== epoch;
     // 等待时限只限制新点击；已落盘原实例回执后，与新租/克隆一样独立核对 30 分钟，绝不再次开机。
     const submitted = t.operation?.receipt?.instanceId === t.config.sourceId;
     if (submitted ? this.clock() - verifySince(t) >= VERIFY_TIMEOUT : this.clock() >= t.deadlineAt) {
@@ -363,33 +387,37 @@ export class Engine {
       this.store.log(t, 'warn', message); this.alert(t, 'boot-timeout', message); return;
     }
     const adapter = this.adapters[t.config.provider];
-    const roundStart = this.clock();
     try {
-      this.store.patch(t, { attempts: t.attempts + 1, state: t.operation ? 'verifying' : 'watching' });
-      const instance = await this.monitorRead(t, 'boot', 'target', async () => validateBootSource(t.config, await adapter.inspectBoot(t)),
+      this.store.patch(t, { attempts: t.attempts + (observed ? 0 : 1), state: t.operation ? 'verifying' : 'watching' });
+      const instance = observed || await this.monitorRead(t, 'boot', 'target', async () => validateBootSource(t.config, await adapter.inspectBoot(t)),
         value => bootSample(value, this.clock()));
-      if (stopped(t) || this.stopping) return;
+      if (interrupted()) return;
       const summary = instance.running ? '原实例已进入 GPU 运行状态' : instance.starting ? '原实例正在开机，等待 GPU 运行确认'
         : instance.gpuAvailable === true ? '原实例所在主机显示 GPU 充足' : instance.gpuAvailable === false ? '原实例所在主机暂无足够 GPU' : '原实例已关机，页面没有明确库存标记';
       this.store.patch(t, { result: instance, lastScan: { at: this.clock(), count: 1, summary, complete: true }, lastError: null });
       if (t.lastProgress !== summary) { this.store.log(t, 'info', summary); this.store.patch(t, { lastProgress: summary }); }
       if (instance.running) {
-        this.store.patch(t, { state: 'completed', errors: 0, result: { ...instance, gpuVerified: true } });
+        this.store.patch(t, { state: 'completed', errors: 0, result: { ...instance, gpuVerified: true }, ...(bootRace(t) ? { raceWinner: 'boot' } : {}) });
         this.alert(t, 'completed', `原实例 ${t.config.sourceId} 已有卡运行，请及时使用并在不用时关机`); return;
       }
       // 提交后即使再次读到“已关机”也只核对，不能把超时或延迟响应解释成拒绝。
       // 提交前的常规检查按本轮起点计时，不叠加读取耗时；已有提交的结果核对仍保持原等待间隔。
-      if (t.operation || instance.starting) { this.schedule(t, { from: t.operation ? null : roundStart }); return; }
+      if (t.operation || instance.starting) {
+        // 本轮已在启动时只观察；只有真正点击后的 operation 才跨轮锁定原机路径。
+        if (bootRace(t) && instance.starting && !t.operation) this.store.patch(t, { raceWinner: 'boot' });
+        this.schedule(t, { from: t.operation ? null : roundStart }); return;
+      }
       if (t.config.action === 'observe') {
         if (instance.gpuAvailable === true) {
-          this.store.patch(t, { state: 'found', errors: 0 }); this.alert(t, 'found', `原实例 ${t.config.sourceId} 显示 GPU 充足；当前为只提醒模式，尚未开机`);
+          this.store.patch(t, { state: 'found', errors: 0, ...(bootRace(t) ? { raceWinner: 'boot' } : {}) }); this.alert(t, 'found', `原实例 ${t.config.sourceId} 显示 GPU 充足；当前为只提醒模式，尚未开机`);
         } else this.schedule(t, { from: roundStart });
         return;
       }
-      if (instance.gpuAvailable === false) { this.schedule(t, { from: roundStart }); return; }
-      this.store.patch(t, { state: 'preparing', operation: { id: randomUUID(), at: this.clock(), stage: 'intent', sourceId: t.config.sourceId } });
+      if (instance.gpuAvailable === false || bootRace(t) && instance.gpuAvailable !== true) { this.schedule(t, { from: roundStart }); return; }
+      this.store.patch(t, { state: 'preparing', operation: { id: randomUUID(), at: this.clock(), stage: 'intent', sourceId: t.config.sourceId,
+        ...(bootRace(t) ? { kind: 'boot' } : {}) }, ...(bootRace(t) ? { raceWinner: 'boot' } : {}) });
       const outcome = await adapter.boot(t, () => {
-        if (stopped(t) || this.stopping) throw new AppError('STOPPED', '任务已暂停，未确认开机');
+        if (interrupted()) throw new AppError('STOPPED', '任务已暂停或重新恢复，未确认开机');
         if (this.clock() >= t.deadlineAt) throw new AppError('BOOT_DEADLINE', '等待时限已到，未确认开机');
         // 在真正付费的确认按钮前落盘，重启后仍只核对这台原实例。
         const clickedAt = this.clock();
@@ -398,7 +426,8 @@ export class Engine {
       });
       if (outcome?.noStock || outcome?.rejected || outcome?.notSubmitted) {
         const message = outcome.message || '实例状态已变化，下轮重新读取';
-        this.store.patch(t, { operation: null, state: stopped(t) ? t.state : outcome.rejected ? 'attention' : 'watching', lastError: outcome.rejected ? message : null });
+        this.store.patch(t, { operation: null, state: stopped(t) ? t.state : outcome.rejected ? 'attention' : 'watching', lastError: outcome.rejected ? message : null,
+          ...(bootRace(t) ? { raceWinner: null, result: null, lastProgress: null, raceBootDeferred: !outcome.rejected } : {}) });
         this.store.log(t, outcome.rejected ? 'error' : 'info', message);
         if (!stopped(t) && !outcome.rejected) this.schedule(t);
         if (outcome.rejected) this.alert(t, 'boot-rejected', message);
@@ -409,8 +438,8 @@ export class Engine {
       this.store.log(t, 'info', outcome?.unclear ? '开机确认已点击，但平台结果尚不明确；只核对原实例，不重复点击' : '已确认原实例开机，接下来只读取运行状态，不重复点击');
       if (!stopped(t)) this.schedule(t);
     } catch (error) {
-      if (t.operation?.stage === 'intent') this.store.patch(t, { operation: null });
-      if (stopped(t) || this.stopping) return;
+      if (t.operation?.stage === 'intent') this.store.patch(t, { operation: null, ...(bootRace(t) ? { raceWinner: null, result: null, lastProgress: null } : {}) });
+      if (interrupted()) return;
       // 进入确认弹窗后才到期仍属于正常结束，没有点击时不误报为需要人工处理。
       if (error.code === 'BOOT_DEADLINE' && !t.operation) {
         this.store.patch(t, { state: 'expired', lastError: null });
@@ -433,6 +462,12 @@ export class Engine {
     this.notePossibleDuplicates(t, status.lateIds);
     // 点击结果不明的提交经自动核对确认未创建：清除记录，立即继续监测；连续出现时提醒一次，不停止任务。
     if (status.notCreated && t.operation.stage === 'click_started' && !t.operation.receipt?.instanceId) {
+      if (bootRace(t)) {
+        // 列表暂时没有新增不是服务器的明确拒绝；组合任务必须保留执行权，避免迟到克隆与原机开机双付费。
+        const message = '克隆点击结果仍不明确；当前实例列表没有新增，已保留提交记录，不会改为原机开机或再次克隆。请在 AutoDL 核对';
+        this.store.patch(t, { state: 'reconciling', lastProgress: message });
+        this.store.log(t, 'warn', message); this.alert(t, 'ambiguous', message); return;
+      }
       const op = t.operation, streak = (t.unclearStreak || 0) + 1;
       const rejection = { at: this.clock(), message: '点击结果不明，自动核对确认未创建', operationId: op.id, baselineIds: op.baselineIds || [], hostNumber: op.quote?.host?.number || '' };
       // 这台主机点击后没有结果：暂时不选，先试其他主机。
@@ -484,29 +519,33 @@ export class Engine {
       this.store.patch(t, { state: 'paused' }); this.store.log(t, 'warn', '已暂停后续检查；已经提交的实例不会被自动关机或删除');
     } else if (action === 'resume') {
       // 已停止的开机任务仍有固定实例回执时，只恢复核对，避免留下无法处理的占用记录。
-      const cancelledBootCheck = t.state === 'cancelled' && t.config.mode === 'boot' && t.operation?.receipt?.instanceId === t.config.sourceId;
+      const cancelledBootCheck = t.state === 'cancelled' && bootPath(t) && t.operation?.receipt?.instanceId === t.config.sourceId;
       if (!['paused','attention','found','expired','reconciling'].includes(t.state) && !cancelledBootCheck) fail('STATE', '当前状态不能恢复');
-      if (t.operation && !t.operation.receipt) fail('RECONCILE', '请先核对并绑定目标实例，提交记录仍被保留');
+      const releaseIntent = bootRace(t) && t.operation?.stage === 'intent';
+      if (t.operation && !t.operation.receipt && !releaseIntent) fail('RECONCILE', '请先核对并绑定目标实例，提交记录仍被保留');
       // 拒绝证据（30 分钟内的延迟创建保护）不随恢复清除；只把用户已核对过的那几台延迟实例记为已知。
       // 已提交的任务恢复后重新等待 30 分钟，不会刚恢复就再次超时。
       // 人工恢复开启新的重试周期，旧的连续错误次数不能立即耗尽本次重试额度。
-      this.store.patch(t, { state: t.operation ? 'verifying' : 'watching', nextCheckAt: this.clock(),
+      this.store.patch(t, { state: t.operation && !releaseIntent ? 'verifying' : 'watching', nextCheckAt: this.clock(),
         deadlineAt: this.clock() + t.config.timeoutMinutes * 60000, lastError: null, errors: 0, retryStreak: 0, unclearStreak: 0,
         submitRejections: carryRejections(t, this.clock()), lateInstanceIds: null, ...(t.operation ? { verifySince: this.clock() } : {}),
-        notifyEpoch: (t.notifyEpoch || 0) + 1 });
+        notifyEpoch: (t.notifyEpoch || 0) + 1,
+        ...(bootRace(t) && (!t.operation || releaseIntent) ? { raceWinner: null, result: null, lastProgress: null } : {}),
+        // 尚未点击的意图可释放；递增 epoch 会使正在返回的旧准备流程失效。
+        ...(releaseIntent ? { operation: null, raceWinner: null, verifySince: null } : {}) });
       this.store.log(t, 'info', cancelledBootCheck ? '继续核对原实例；保留原开机回执，不再次点击开机' : '已恢复任务');
     } else if (action === 'cancel') {
       if (['completed','cancelled'].includes(t.state)) fail('STATE', '任务已经结束');
       this.store.patch(t, { state: 'cancelled' }); this.store.log(t, 'warn', '本地任务已停止；云端实例和磁盘会保留，已发生的费用需到 AutoDL 管理');
     } else if (action === 'verify-data') {
-      if (!t.operation?.receipt || (t.config.mode !== 'clone' || t.config.copyDataDisk === false) || !['attention','verifying','paused'].includes(t.state) || value.confirmed !== true) fail('STATE', '仅可在绑定目标实例后，明确核验数据盘再确认');
+      if (!t.operation?.receipt || bootPath(t) || (t.config.mode !== 'clone' || t.config.copyDataDisk === false) || !['attention','verifying','paused'].includes(t.state) || value.confirmed !== true) fail('STATE', '仅可在绑定目标实例后，明确核验数据盘再确认');
       this.store.patch(t, { manualDataVerifiedAt: this.clock(), state: 'verifying', nextCheckAt: this.clock() });
       this.store.log(t, 'warn', '用户已人工确认目标实例的数据盘文件完整；继续核对 GPU 运行状态');
     } else fail('ACTION', '不支持的任务操作');
     this.wake();
   }
   async attach(t, id) {
-    if(t.config.mode === 'boot') fail('STATE', '原实例开机已绑定目标 ID，请使用恢复任务继续核对');
+    if (bootPath(t)) fail('STATE', '原实例开机已绑定目标 ID，请使用恢复任务继续核对');
     if(t.config.provider!=='autodl') fail('PROVIDER_REMOVED','旧版演练任务已停用，无法绑定实例',{status:410});
     if (this.busy) fail('BUSY', '浏览器正在执行检查，请稍后再绑定', { status: 409 });
     // 已停止但保留提交记录的任务也可以绑定，否则其提交记录会一直阻挡同型号/同源的新任务。
@@ -541,6 +580,11 @@ export class Engine {
       if (result.extra.length) {
         this.store.log(t, 'warn', '重新核对：实例列表有 ' + result.extra.length + ' 个提交前没有的实例（' + result.extra.slice(0, 3).map(i => i.id).join('、') + '），请确认后绑定；提交记录保留');
         return { cleared: false, extra: result.extra };
+      }
+      if (bootRace(t)) {
+        const reason = '组合任务的克隆点击结果不明确；列表暂时没有新增也不能排除迟到创建，提交记录已保留，不会改为原机开机';
+        this.store.log(t, 'warn', reason);
+        return { cleared: false, extra: [], reason };
       }
       const resolved = { operationId: op.id, at: op.at, resolvedAt: this.clock(), outcome: 'not-created', hostNumber: op.quote?.host?.number || '', baselineCount: (op.baselineIds || []).length };
       // 人工核对也保留完整基线，与自动核对共用延迟创建保护；稍后出现旧提交的实例时不能再次租用。

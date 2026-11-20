@@ -75,6 +75,52 @@ test('HTTP 原实例开机须确认费用，未确认时不落任务', async t =
   assert.equal(f.app.store.tasks().length, 0);
 });
 
+const raceConfig = (extra = {}) => requestConfig({ mode: 'clone', raceBoot: true, pricePolicy: 'official', ...extra });
+
+test('组合抢卡只接受已关机原实例的规格和明确授权的计费方式', async t => {
+  const f = await fixture(t);
+  for (const extra of [{ raceBoot: 'true' }, { mode: 'boot' }, { paidConsent: false },
+    { balanceGuard: true }, { pricePolicy: 'limits' }, { maxTotalHourly: 5 }]) {
+    assert.equal((await f.request('/api/tasks', raceConfig(extra))).status, 400, JSON.stringify(extra));
+  }
+  for (const extra of [{ gpuModel: 'RTX 3090' }, { gpuCount: 2 }, { regions: ['西北B区'] }]) {
+    assert.equal((await f.request('/api/tasks', raceConfig(extra))).status, 409, JSON.stringify(extra));
+  }
+  Object.assign(f.row, { stopped: false, running: true });
+  assert.equal((await f.request('/api/tasks', raceConfig())).status, 409);
+  Object.assign(f.row, { stopped: true, running: false });
+  const response = await f.request('/api/tasks', raceConfig({ action: 'observe', paidConsent: false }));
+  assert.equal(response.status, 201);
+  const { task } = await response.json();
+  assert.equal(task.config.raceBoot, true);
+  assert.equal(task.config.paidConsent, false);
+  assert.equal(f.app.store.tasks().length, 1);
+});
+
+test('同一源实例的独立任务与组合任务互斥，另一源实例可以同时监测', async t => {
+  const f = await fixture(t);
+  const second = { ...f.row, id: 'synthetic-second' };
+  f.adapter.instances = async () => [f.row, second];
+  const single = await (await f.request('/api/tasks', requestConfig())).json();
+  f.row.gpuAvailable = false;
+  await f.app.engine.step(f.app.store.get(single.task.id));
+  assert.equal(f.app.store.get(single.task.id).result.id, f.row.id);
+  assert.equal(f.bootCalls, 0);
+  assert.equal((await f.request('/api/tasks', raceConfig())).status, 409);
+  await f.request(`/api/tasks/${single.task.id}/pause`, {});
+  // 尚未提交的暂停任务可以由用户明确替换，两条分支随后归一个任务管理。
+  const response = await f.request('/api/tasks', raceConfig({ replaceTaskId: single.task.id }));
+  assert.equal(response.status, 201);
+  const { task } = await response.json();
+  assert.equal(f.app.store.get(single.task.id).state, 'cancelled');
+  assert.equal((await f.request('/api/tasks', requestConfig())).status, 409);
+  assert.equal((await f.request('/api/tasks', raceConfig({ raceBoot: false }))).status, 409);
+  assert.equal((await f.request('/api/tasks', raceConfig({ sourceId: second.id }))).status, 201);
+  // 已点击但结果未知的任务即使本地停止，也不能被新开机任务绕过。
+  f.app.store.patch(f.app.store.get(task.id), { state: 'cancelled', operation: { kind: 'clone', stage: 'click_started' } });
+  assert.equal((await f.request('/api/tasks', requestConfig())).status, 409);
+});
+
 test('HTTP 无卡运行实例不能被任务自动关机再抢卡', async t => {
   const f = await fixture(t, { stopped: false, running: false, cardless: true });
   const response = await f.request('/api/tasks', requestConfig());

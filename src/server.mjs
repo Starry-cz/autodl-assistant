@@ -577,7 +577,7 @@ export function createApplication({ runtimeDir = process.env.AUTODL_RUNTIME_DIR 
           if(accountEnabled)assertTaskOwner(task,visibleIdentity());
           if(matched[2] === 'attach') await engine.attach(task,data.instanceId);
           else if(matched[2] === 'recheck') {
-            if(data.confirmed !== true) fail('CONFIRM','请确认已了解：仅在完整实例列表没有新增实例时才清除提交记录',{status:400});
+            if(data.confirmed !== true) fail('CONFIRM','请先确认重新核对此次提交的实例列表',{status:400});
             requireSession();
             return json(res,200,{task,result:await engine.recheck(task)});
           }

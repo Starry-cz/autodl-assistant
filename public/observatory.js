@@ -40,7 +40,7 @@
     set('overview-target-count', target ? 1 : 0);
     set('overview-running-count', data?.checkedAt ? data.summary.running : '—');
     html('overview-gpus', target ? '<div class="data-row"><div><strong>' + esc(target.gpuModel || '型号未知') + ' × ' + number(target.gpuCount) + '</strong><p>' + esc(target.region || '区域未知') + ' · ' + esc(target.machineId || '主机编号未知') + '</p></div><span class="badge neutral">' + esc(target.statusLabel) + '</span></div>' : empty('请选择监控实例'));
-    const watching = (appState.tasks || []).filter(t => t.config.mode === 'boot' && t.config.sourceId === targetId && t.config.action === 'execute' && active(t));
+    const watching = (appState.tasks || []).filter(t => (t.config.mode === 'boot' || t.config.raceBoot && winningBranch(t) !== 'clone') && t.config.sourceId === targetId && t.config.action === 'execute' && active(t));
     const options = '<option value="">选择监控实例</option>' + rows.map(i => '<option value="' + esc(i.id) + '"' + (i.id === targetId ? ' selected' : '') + '>' + esc(i.name || i.id) + ' · ' + esc(i.gpuModel || '型号未知') + '</option>').join('');
     html('overview-targets', '<div class="overview-target-picker"><label>监控目标<select id="overview-target-select" aria-label="监控目标">' + options + '</select></label><button type="button" class="button" data-configure-boot="' + esc(targetId) + '"' + (!target || !ready() ? ' disabled' : '') + '>配置开机任务</button></div><span class="badge neutral overview-automation-state">' + (watching.length ? '开机任务：' + esc(watching.map(t => STATES[t.state] || t.state).join('、')) : '自动开机未启用') + '</span>');
     html('overview-resources', target ? resourceReadings(target) : empty('请选择监控实例'));

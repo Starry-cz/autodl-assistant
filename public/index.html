@@ -74,7 +74,11 @@
         <div id="live-note" class="notice compact">连接并核验账号后，可开始监测。</div>
         <div id="clone-fields" class="hidden">
               <div id="live-source-fields"><label><span id="source-label">选择源实例</span><select name="sourceId" aria-describedby="source-summary"><option value="">请先同步 AutoDL 实例</option></select></label><button id="refresh-sources" type="button" class="button small">同步实例列表</button><p id="source-summary" class="hint" role="status">请选择已关机的源实例。</p></div>
-              <div id="clone-options"><label class="check-label"><input type="checkbox" name="copyDataDisk" checked>同时复制数据盘</label>
+              <button type="button" id="boot-or-clone" class="button small" hidden>同时等待同区克隆</button>
+              <div id="clone-options">
+                <label class="check-label"><input type="checkbox" name="raceBoot" aria-describedby="race-help">原实例开机或同区克隆，先用一台</label>
+                <p id="race-help" class="hint"></p>
+                <label class="check-label"><input type="checkbox" name="copyDataDisk" checked>同时复制数据盘</label>
               <div id="copy-disk-note" class="notice">克隆系统盘并复制数据盘，目标扩容至少等于源扩容。源实例会保留。</div>
               <details class="flow-card inline-disclosure"><summary>克隆说明</summary><div class="flow"><span>发现同区空卡</span><i>→</i><span>克隆系统盘</span><i>→</i><span>按选择复制数据盘</span><i>→</i><span>确认运行</span></div><p>开机后请确认数据盘复制完成；未勾选时只克隆系统盘。</p></details>
             </div>
@@ -100,7 +104,7 @@
         <div class="field-grid"><label>检查间隔 <span class="unit">秒</span><input name="pollSeconds" type="number" min="10" max="600" step="1" value="10" required aria-describedby="poll-hint"></label><label>最长监测 <span class="unit">分钟</span><input name="timeoutMinutes" type="number" min="1" max="10080" value="1440" required></label></div>
         <p id="poll-hint" class="hint">到期停止监测，不会关闭云端实例。</p>
 
-        <div id="pricing-fields"><details id="pricing-options" class="option-group"><summary><span>费用预览</span></summary><div class="option-body">
+        <div id="pricing-fields"><details id="pricing-options" class="option-group"><summary><span id="pricing-heading">费用预览</span></summary><div class="option-body">
             <section id="pricing-card" class="pricing-card" aria-label="当前配置报价">
               <div class="price-values single"><div><span>单卡每小时</span><strong id="price-unit">—</strong></div></div>
               <p id="price-detail" class="price-detail" hidden>配置每小时 <span id="price-hourly">—</span><span id="price-cards"></span> · 磁盘每日 <span id="price-storage">—</span></p>

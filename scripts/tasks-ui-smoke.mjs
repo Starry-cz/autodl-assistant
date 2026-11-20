@@ -69,12 +69,12 @@ try {
   // 停止后仍保留的提交必须阻止重建，不能因状态 cancelled 就重复租用。
   app.store.patch(next,{state:'cancelled',operation:{stage:'click_started',at:1},lastError:'提交结果需核对'});
   await page.locator('#submit-task').click();await dialog.waitFor({state:'visible'});
-  assert.equal(await page.locator('#replace-task').isHidden(),true);assert.match(await page.locator('#conflict-help').textContent(),/核对.*目标实例/);
+  assert.equal(await page.locator('#replace-task').isHidden(),true);assert.match(await page.locator('#conflict-help').textContent(),/绑定目标实例.*重新核对实例列表/);
   await page.locator('#conflict-close').click();assert.equal(app.store.tasks().length,2);
 
   // 旧后台缺少替换协议时仅展示原因和正常重启说明，不先取消旧任务。
   legacyConflict=true;await page.evaluate(()=>refresh());await page.locator('#submit-task').click();await dialog.waitFor({state:'visible'});
-  assert.match(await page.locator('#conflict-help').textContent(),/旧版任务接口/);assert.match(await page.locator('#conflict-help').textContent(),/npm\.cmd start/);
+  assert.match(await page.locator('#conflict-help').textContent(),/后台版本不匹配.*正常退出并重新启动助手.*当前表单已保留/);
   assert.equal(await page.locator('#replace-task').isHidden(),true);await page.locator('#conflict-close').click();
   assert.equal(await field('pollSeconds').inputValue(),'10');assert.equal(app.store.tasks().length,2);
   // 已停止的不明提交：详情页可重新核对实例列表；合成列表没有新增实例时清除记录，之后可按当前配置新建。
@@ -103,7 +103,7 @@ try {
   const buttonRect=await page.locator('#submit-task').boundingBox();
   assert.ok(buttonRect.y>=0&&buttonRect.y+buttonRect.height<=1080,JSON.stringify(buttonRect));
   await page.locator('#toggle-queue').click();
-  assert.equal(await page.locator('#tasks').isHidden(),true);const folded=(await page.locator('#queue-summary').textContent()).match(/已收起：进行中 (\d+) 个，需要处理 (\d+) 个，其余 (\d+) 个/);
+  assert.equal(await page.locator('#tasks').isHidden(),true);const folded=(await page.locator('#queue-summary').textContent()).match(/进行中 (\d+) · 待处理 (\d+) · 其余 (\d+)/);
   assert.ok(folded&&Number(folded[1])+Number(folded[2])+Number(folded[3])===13,String(folded));
   await page.reload();await page.waitForFunction(()=>document.querySelector('#task-count').textContent==='13');
   await page.locator('[data-view=dashboard]').click();

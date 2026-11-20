@@ -29,9 +29,14 @@
   }
 
   function summary(task) {
-    const sample = samplesOf(task).at(-1), checkedAt = task.monitor?.lastCheckedAt || sample?.at;
+    const samples = samplesOf(task), sample = samples.at(-1), checkedAt = task.monitor?.lastCheckedAt || sample?.at;
+    const latest = (label, value) => '<span>' + label + ' <strong data-monitor-latest title="' + esc(value?.note || '') + '">' + esc(reading(value)) + '</strong></span>';
+    // 组合任务的原机读数是有卡状态，不能和同区市场的空卡张数混用。
+    const inventory = task.config.raceBoot
+      ? latest('原实例', samples.findLast(item => item.kind === 'boot')) + latest('同区库存', samples.findLast(item => item.kind === 'market'))
+      : latest('最近库存', sample);
     // 占位文字固定，倒计时由 tick 单独写入，避免每两秒改变整个任务卡的 HTML 签名。
-    return '<div class="task-monitor-summary"><span>最近库存 <strong data-monitor-latest title="' + esc(sample?.note || '') + '">' + esc(reading(sample)) + '</strong></span>'
+    return '<div class="task-monitor-summary">' + inventory
       + '<span>上次检查 <time data-monitor-checked title="' + esc(checkedAt ? time(checkedAt, true) : '尚未检查') + '">' + (checkedAt ? time(checkedAt) : '—') + '</time></span>'
       + '<span class="task-next-check" data-task-countdown="' + esc(task.id) + '" data-next="' + esc(task.nextCheckAt ?? '') + '">—</span></div>';
   }
@@ -74,9 +79,10 @@
   }
 
   function history(task) {
-    const samples = samplesOf(task), boot = task.config.mode === 'boot';
+    const all = samplesOf(task), boot = task.config.mode === 'boot';
+    const samples = task.config.raceBoot ? all.filter(item => item.kind === 'market') : all;
     // 常驻区域只保留趋势和读数；采样口径放入可聚焦的信息提示。
-    return '<details class="task-monitor-history" data-monitor-history="' + esc(task.id) + '"><summary><span>库存趋势</span><small>' + (samples.length ? samples.length + ' 次采样' : '未采样') + '</small></summary>'
+    return '<details class="task-monitor-history" data-monitor-history="' + esc(task.id) + '"><summary><span>' + (task.config.raceBoot ? '同区克隆库存趋势' : '库存趋势') + '</span><small>' + (samples.length ? samples.length + ' 次采样' : '未采样') + '</small></summary>'
       + '<div class="task-monitor-history-body"><div class="task-monitor-history-heading">' + summary(task)
       + '<button type="button" class="info-button" aria-label="采样范围说明" data-help="最近 60 次采样。' + (boot ? '纵轴表示原实例 GPU 是否充足。' : '实心点为完整读数，空心点为部分读数；未知或失败处不连线。') + '"><span aria-hidden="true">i</span></button></div>'
       + chart(task, samples) + '</div></details>';
@@ -101,7 +107,7 @@
       // 等待期间切账号或关闭旧任务详情时，不下载此前账号的响应。
       if (owner !== appState.account?.identity?.ownerId || !appState.tasks.some(task => String(task.id) === id) || !document.getElementById('task-dialog').open || String(detailId) !== id) return;
       const task = result.task;
-      const lines = ['AutoDL 任务日志', '任务：' + task.name, '任务 ID：' + task.id, '类型：' + modeLabel(task.mode), '状态：' + (STATES[task.state] || task.state),
+      const lines = ['AutoDL 任务日志', '任务：' + task.name, '任务 ID：' + task.id, '类型：' + taskModeLabel(appState.tasks.find(item => String(item.id) === id)), '状态：' + (STATES[task.state] || task.state),
         '创建：' + time(task.createdAt, true), '更新：' + time(task.updatedAt, true), '本机最近最多 ' + result.limit + ' 条日志，本次导出 ' + result.logs.length + ' 条。', '',
         ...result.logs.map(log => '[' + time(log.at, true) + '] [' + log.level + '] ' + log.message)];
       const url = URL.createObjectURL(new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/plain;charset=utf-8' }));
