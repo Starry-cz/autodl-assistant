@@ -49,6 +49,7 @@ try {
   assert.equal(await scheduler.inputValue(),'serial');
   assert.equal(await scheduler.isEnabled(),true);
   assert.equal(await readLimit.isHidden(),true);
+  assert.equal(await schedulerStatus.textContent(),'一次查一个任务的库存，查完就轮到下一个。');
   const staleRead=Promise.withResolvers(), allowOldState=Promise.withResolvers();
   // 让切换前真实读取的快照迟到，验证前端不会用旧模式覆盖保存结果。
   await page.route(base+'/api/state',async route=>{
@@ -65,7 +66,7 @@ try {
   allowOldState.resolve();
   await page.waitForFunction(()=>!fetching);
   assert.equal(await scheduler.inputValue(),'parallel');assert.equal(await readLimit.inputValue(),'2');
-  assert.match(await schedulerStatus.textContent(),/其余任务排队.*付费提交逐笔核验/);
+  assert.match(await schedulerStatus.textContent(),/最多 2 个任务同时找卡，其余的按顺序依次找卡.*自动执行.*依次下单/);
   const chooseThree=page.waitForResponse(r=>r.url()===base+'/api/scheduler'&&r.request().method()==='POST');
   await readLimit.selectOption('3');
   assert.deepEqual((await (await chooseThree).json()).scheduler, {mode:'parallel',maxParallel:3,maxSupportedParallel:3});
@@ -75,6 +76,7 @@ try {
   await page.locator('[data-view=dashboard]').click();
   assert.equal(await scheduler.inputValue(),'parallel');
   assert.equal(await readLimit.inputValue(),'3');
+  assert.equal(await schedulerStatus.textContent(),'最多 3 个任务同时找卡，其余的按顺序依次找卡。找到卡后，选了「自动执行」的任务会依次下单。');
   // 保存失败要恢复已生效的选项，且保留可重试入口。
   await page.route(base+'/api/scheduler',route=>route.fulfill({status:409,json:{error:'UPDATING',message:'正在准备更新'}}),{times:1});
   await readLimit.selectOption('2');
@@ -95,7 +97,7 @@ try {
     state.scheduler={mode:'parallel',maxParallel:2};await route.fulfill({json:state});
   };
   await page.route(base+'/api/state',fixedScheduler);await page.evaluate(()=>refresh());
-  await page.waitForFunction(()=>document.querySelector('#scheduler-status').textContent.includes('同时查 2 项'));
+  await page.waitForFunction(()=>document.querySelector('#scheduler-status').textContent.includes('最多 2 个任务同时找卡'));
   assert.equal(await scheduler.isEnabled(),true);assert.equal(await readLimit.isHidden(),true);
   await page.unroute(base+'/api/state',fixedScheduler);
   // 旧后台不会提供范围或调度模式，不开放无法兑现的并行选项。

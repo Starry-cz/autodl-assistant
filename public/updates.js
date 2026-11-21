@@ -4,6 +4,7 @@
 (() => {
   const releaseHome='https://github.com/Starry-cz/autodl-assistant/releases/latest';
   let snapshot=null, checking=false, requestError='', installRequested=false, reconnecting=false, reconnectTimedOut=false;
+  let installRequestError='';
   const version=value=>value?'v'+value:'尚未检查';
   function setDownload(id,url,visible) {
     const link=$('#'+id);link.hidden=!visible||!url;
@@ -12,7 +13,10 @@
   function renderUpdates(next) {
     // 保留刚收到的检查结果，避免此前发出的状态轮询短暂覆盖更新后的信息。
     if(next&&(!snapshot||next.currentVersion!==snapshot.currentVersion||Number(next.revision)>=Number(snapshot.revision))){
-      snapshot=next;if(!checking)requestError='';
+      // 同一次检查的状态会被反复轮询；只有新结果才能清除本页的请求错误。
+      if(!snapshot || next.currentVersion!==snapshot.currentVersion || Number(next.revision)>Number(snapshot.revision)) requestError='';
+      if(!next.updateAvailable || next.latestVersion!==snapshot?.latestVersion || ['preparing','switching'].includes(next.installation?.status)) installRequestError='';
+      snapshot=next;
     }
     const data=snapshot||{}, available=!!data.updateAvailable, desktop=data.channel==='desktop';
     const installation=data.installation||{}, installing=installRequested||['preparing','switching'].includes(installation.status);
@@ -24,9 +28,10 @@
     $('#update-check').disabled=busy||installing;$('#update-check').textContent=busy?'检查中…':'检查更新';
     $('#update-install').hidden=!available&&!installing;
     $('#update-install').disabled=busy||installing;
-    $('#update-install').textContent=installing?'正在更新…':installation.status==='error'?'重试更新':'更新并重启';
-    $('#update-installation').hidden=!installation.message&&!installRequested;
-    $('#update-installation').textContent=reconnectTimedOut?'尚未确认新版启动，请重新打开助手或查看更新日志。数据已保留。':installation.message||(installRequested?'正在准备更新…':'');
+    $('#update-install').textContent=installing?'正在更新…':installRequestError||installation.status==='error'?'重试更新':'更新并重启';
+    const installMessage=installRequestError||installation.message||(installRequested?'正在准备更新…':'');
+    $('#update-installation').hidden=!installMessage&&!reconnectTimedOut;
+    $('#update-installation').textContent=reconnectTimedOut?'尚未确认新版启动，请重新打开助手或查看更新日志。数据已保留。':installMessage;
     if(installing&&!reconnecting&&!reconnectTimedOut&&installation.targetVersion)void waitForNewBackend(installation.targetVersion);
     $('#version-updates .updates-panel').dataset.updateState=status;
     const message={idle:'尚未检查。',checking:'正在检查更新…',available:'发现新版本 '+version(data.latestVersion)+'。',current:'已是最新版本。',ahead:'当前版本高于公开发布版。',error:'检查失败 · '+(requestError||data.error||'请稍后重试。')}[status];
@@ -62,12 +67,13 @@
   }
   async function installUpdate() {
     if(installRequested)return;
-    installRequested=true;requestError='';reconnectTimedOut=false;renderUpdates();
+    installRequested=true;installRequestError='';requestError='';reconnectTimedOut=false;renderUpdates();
     try {
       const result=await api('/api/updates/install',{});
       snapshot={...snapshot,installation:result.installation};
     } catch(error) {
-      snapshot={...snapshot,installation:{status:'error',message:error.message}};
+      // 启动安装前被拒绝时，后台仍是 idle；在本页保留原因，供用户处理后重试。
+      installRequestError=error.message;
     } finally {installRequested=false;renderUpdates();}
   }
   async function waitForNewBackend(targetVersion) {

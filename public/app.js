@@ -64,8 +64,8 @@ function renderSchedule(connected = true) {
   limit.disabled = field.disabled || !adjustable || selected?.mode !== 'parallel';
   if (selected?.maxParallel) limit.value = String(selected.maxParallel);
   const message = !connected ? '本地服务已断开' : !scheduler ? '当前后台不支持切换' : savingSchedule ? '正在保存…'
-    : scheduler.mode === 'serial' ? '按顺序检查任务。'
-    : (adjustable ? '' : '同时查 ' + scheduler.maxParallel + ' 项。') + '其余任务排队，付费提交逐笔核验。';
+    : scheduler.mode === 'serial' ? '一次查一个任务的库存，查完就轮到下一个。'
+    : `最多 ${scheduler.maxParallel} 个任务同时找卡，其余的按顺序依次找卡。找到卡后，选了「自动执行」的任务会依次下单。`;
   if (status.textContent !== message) status.textContent = message;
 }
 async function saveSchedule(event) {

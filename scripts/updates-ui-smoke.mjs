@@ -98,6 +98,17 @@ try {
       }
       pass(channel + '：1440/768/390/320 宽度布局与操作可用');
       await page.setViewportSize({ width: 1440, height: 1050 });
+      // 后台拒绝安装时仍处于 idle；正常轮询不能擦掉用户刚收到的原因。
+      await page.locator('#update-install').click();
+      await page.waitForFunction(() => document.querySelector('#update-installation').textContent.includes('正式启动入口'));
+      await page.evaluate(() => renderUpdates(appState.updates));
+      assert.match(await page.locator('#update-installation').innerText(), /正式启动入口/);
+      assert.equal(await page.locator('#update-installation').isVisible(), true);
+      await page.route(base + '/api/updates/check', route => route.fulfill({status:503,json:{message:'暂时无法连接更新服务'}}), {times:1});
+      await page.locator('#update-check').click();
+      await page.waitForFunction(() => document.querySelector('#update-status').textContent.includes('暂时无法连接更新服务'));
+      await page.evaluate(() => renderUpdates(appState.updates));
+      assert.match(await page.locator('#update-status').innerText(), /暂时无法连接更新服务/);
       await page.locator('#update-check').click();
       await page.waitForFunction(() => !document.querySelector('#update-check').disabled);
       assert.equal(requests, 1, '一分钟内手动检查应复用结果');

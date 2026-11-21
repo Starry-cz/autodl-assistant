@@ -77,7 +77,9 @@ test('1秒间隔按到期时间检查；正常抖动和错误退避仍生效',as
 test('提交前重启清除intent并暂停，可恢复；不会误认为已点击',async t=>{
   const f=fixture(t);f.store.patch(f.task,{state:'submitting',operation:{stage:'intent',at:f.clock()}});
   const disk=new Store(f.dir,{clock:f.clock});const engine=new Engine(disk,{autodl:f.adapter},f.notifier,{clock:f.clock,random:()=>0});
-  const task=disk.get(f.task.id);assert.equal(task.state,'paused');assert.equal(task.operation,null);engine.control(task,'resume');await engine.tick();assert.equal(f.submissions,1);
+  const task=disk.get(f.task.id);assert.equal(task.state,'paused');assert.equal(task.operation,null);
+  assert.match(task.logs.at(-1).message,/任务已暂停，可恢复/);
+  engine.control(task,'resume');await engine.tick();assert.equal(f.submissions,1);
 });
 test('点击后断线进入对账，重启和重复tick都不会再次创建',async t=>{
   const f=fixture(t);let clicks=0;f.adapter.submit=async(_t,_q,mark)=>{mark();clicks++;throw new AppError('NETWORK','隔离合成断线',{retryable:true});};

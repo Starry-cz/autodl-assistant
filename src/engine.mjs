@@ -70,9 +70,11 @@ export class Engine {
       // 只落盘了操作意图、还没进入点击：不论任务此时是暂停、已停止还是进行中，都清除这条记录（适配器必须在 mark 之后才点击）。
       // 否则暂停后进程被强行结束，这条意图会永久挡住恢复、重新核对和同型号/同源的新任务。
       if (t.operation?.stage === 'intent') {
-        this.store.patch(t, { state: ACTIVE.has(t.state) ? 'paused' : t.state, operation: null,
+        // patch 会立即修改 t.state，恢复日志应依据重启前的状态。
+        const wasActive = ACTIVE.has(t.state);
+        this.store.patch(t, { state: wasActive ? 'paused' : t.state, operation: null,
           ...(bootRace(t) ? { raceWinner: null, result: null, lastProgress: null } : {}) });
-        this.store.log(t, 'warn', ACTIVE.has(t.state) ? '服务重启：此前尚未进入提交点击，任务已暂停，可恢复重新检查' : '服务重启：清除了尚未进入点击的操作意图（没有点击付费按钮）');
+        this.store.log(t, 'warn', wasActive ? '服务重启：此前尚未进入提交点击，任务已暂停，可恢复重新检查' : '服务重启：清除了尚未进入点击的操作意图（没有点击付费按钮）');
         continue;
       }
       if (!ACTIVE.has(t.state)) continue;
